@@ -1,7 +1,29 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File
+from pathlib import Path
 
-app = FastAPI()
+app = FastAPI(title="Admissions RAG Assistant")
+
+UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR.mkdir(exist_ok=True)
+
 
 @app.get("/")
 def root():
     return {"message": "Admissions RAG Assistant is running"}
+
+
+@app.post("/upload")
+async def upload_document(file: UploadFile = File(...)):
+    file_path = UPLOAD_DIR / file.filename
+
+    content = await file.read()
+
+    with open(file_path, "wb") as saved_file:
+        saved_file.write(content)
+
+    return {
+        "filename": file.filename,
+        "content_type": file.content_type,
+        "size_bytes": len(content),
+        "saved_to": str(file_path)
+    }

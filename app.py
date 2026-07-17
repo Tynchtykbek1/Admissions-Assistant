@@ -71,8 +71,18 @@ def ask_question(request: QuestionRequest):
         relevant_chunks=relevant_chunks
     )
 
+    sources = []
+
+    for chunk in relevant_chunks:
+        sources.append({
+            "chunk_id": chunk["chunk_id"],
+            "filename": chunk["filename"],
+            "score": chunk["score"],
+            "preview": chunk["text"][:200] + "..."
+        })
+
     return {
         "question": request.question,
         "answer": answer,
-        "sources": relevant_chunks
+        "sources": sources
     }

@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from document_processor import extract_text_from_txt, split_text_into_chunks
 from retriever import find_relevant_chunks
+from answer_generator import generate_basic_answer
 
 app = FastAPI(title="Admissions RAG Assistant")
 
@@ -65,7 +66,13 @@ def ask_question(request: QuestionRequest):
         chunks=DOCUMENT_CHUNKS
     )
 
+    answer = generate_basic_answer(
+        question=request.question,
+        relevant_chunks=relevant_chunks
+    )
+
     return {
         "question": request.question,
-        "relevant_chunks": relevant_chunks
+        "answer": answer,
+        "sources": relevant_chunks
     }

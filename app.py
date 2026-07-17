@@ -1,6 +1,6 @@
 from fastapi import FastAPI, UploadFile, File
 from pathlib import Path
-from document_processor import extract_text_from_txt
+from document_processor import extract_text_from_txt, split_text_into_chunks
 
 app = FastAPI(title="Admissions RAG Assistant")
 
@@ -23,14 +23,18 @@ async def upload_document(file: UploadFile = File(...)):
         saved_file.write(content)
 
     extracted_text = None
+    chunks = []
 
     if file_path.suffix == ".txt":
         extracted_text = extract_text_from_txt(file_path)
+        chunks = split_text_into_chunks(extracted_text)
 
     return {
         "filename": file.filename,
         "content_type": file.content_type,
         "size_bytes": len(content),
         "saved_to": str(file_path),
-        "extracted_text": extracted_text
+        "text_length": len(extracted_text) if extracted_text else 0,
+        "chunks_count": len(chunks),
+        "first_chunk": chunks[0] if chunks else None
     }

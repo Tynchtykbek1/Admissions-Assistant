@@ -1,11 +1,20 @@
 from fastapi import FastAPI, UploadFile, File
 from pathlib import Path
+from pydantic import BaseModel
+
 from document_processor import extract_text_from_txt, split_text_into_chunks
+from retriever import find_relevant_chunks
 
 app = FastAPI(title="Admissions RAG Assistant")
 
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
+
+DOCUMENT_CHUNKS = []
+
+
+class QuestionRequest(BaseModel):
+    question: str
 
 
 @app.get("/")
@@ -29,6 +38,15 @@ async def upload_document(file: UploadFile = File(...)):
         extracted_text = extract_text_from_txt(file_path)
         chunks = split_text_into_chunks(extracted_text)
 
+        DOCUMENT_CHUNKS.clear()
+
+        for index, chunk in enumerate(chunks):
+            DOCUMENT_CHUNKS.append({
+                "chunk_id": index,
+                "filename": file.filename,
+                "text": chunk
+            })
+
     return {
         "filename": file.filename,
         "content_type": file.content_type,
@@ -37,4 +55,17 @@ async def upload_document(file: UploadFile = File(...)):
         "text_length": len(extracted_text) if extracted_text else 0,
         "chunks_count": len(chunks),
         "first_chunk": chunks[0] if chunks else None
+    }
+
+
+@app.post("/ask")
+def ask_question(request: QuestionRequest):
+    relevant_chunks = find_relevant_chunks(
+        question=request.question,
+        chunks=DOCUMENT_CHUNKS
+    )
+
+    return {
+        "question": request.question,
+        "relevant_chunks": relevant_chunks
     }

@@ -12,20 +12,20 @@ def generate_basic_answer(question: str, relevant_chunks: list[dict]) -> str:
         return "I do not have enough information in the uploaded document to answer this question."
 
     question_words = tokenize(question)
-    best_chunk = relevant_chunks[0]
-    sentences = split_into_sentences(best_chunk["text"])
-
     scored_sentences = []
 
-    for sentence in sentences:
-        sentence_words = tokenize(sentence)
-        score = len(question_words.intersection(sentence_words))
+    for chunk in relevant_chunks:
+        sentences = split_into_sentences(chunk["text"])
 
-        if score > 0:
-            scored_sentences.append({
-                "sentence": sentence,
-                "score": score
-            })
+        for sentence in sentences:
+            sentence_words = tokenize(sentence)
+            score = len(question_words.intersection(sentence_words))
+
+            if score > 0:
+                scored_sentences.append({
+                    "sentence": sentence,
+                    "score": score
+                })
 
     if not scored_sentences:
         return (
@@ -35,6 +35,19 @@ def generate_basic_answer(question: str, relevant_chunks: list[dict]) -> str:
 
     scored_sentences.sort(key=lambda item: item["score"], reverse=True)
 
-    best_sentence = scored_sentences[0]["sentence"]
+    selected_sentences = []
+    seen_sentences = set()
 
-    return f"Based on the uploaded document: {best_sentence}"
+    for item in scored_sentences:
+        sentence = item["sentence"]
+
+        if sentence not in seen_sentences:
+            selected_sentences.append(sentence)
+            seen_sentences.add(sentence)
+
+        if len(selected_sentences) == 3:
+            break
+
+    answer_text = " ".join(selected_sentences)
+
+    return f"Based on the uploaded document: {answer_text}"

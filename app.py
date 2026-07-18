@@ -9,6 +9,7 @@ from document_processor import (
 )
 from retriever import find_relevant_chunks
 from answer_generator import generate_basic_answer
+from embedding_retriever import find_relevant_chunks_semantic
 
 app = FastAPI(title="Admissions RAG Assistant")
 
@@ -86,6 +87,34 @@ async def upload_document(file: UploadFile = File(...)):
 @app.post("/ask")
 def ask_question(request: QuestionRequest):
     relevant_chunks = find_relevant_chunks(
+        question=request.question,
+        chunks=DOCUMENT_CHUNKS
+    )
+
+    answer = generate_basic_answer(
+        question=request.question,
+        relevant_chunks=relevant_chunks
+    )
+
+    sources = []
+
+    for chunk in relevant_chunks:
+        sources.append({
+            "chunk_id": chunk["chunk_id"],
+            "filename": chunk["filename"],
+            "score": chunk["score"],
+            "preview": chunk["text"][:200] + "..."
+        })
+
+    return {
+        "question": request.question,
+        "answer": answer,
+        "sources": sources
+    }
+
+@app.post("/ask-semantic")
+def ask_question_semantic(request: QuestionRequest):
+    relevant_chunks = find_relevant_chunks_semantic(
         question=request.question,
         chunks=DOCUMENT_CHUNKS
     )

@@ -116,7 +116,8 @@ def ask_question(request: QuestionRequest):
 def ask_question_semantic(request: QuestionRequest):
     relevant_chunks = find_relevant_chunks_semantic(
         question=request.question,
-        chunks=DOCUMENT_CHUNKS
+        chunks=DOCUMENT_CHUNKS,
+        top_k=1
     )
 
     answer = generate_basic_answer(

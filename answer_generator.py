@@ -1,5 +1,9 @@
 import re
-from retriever import tokenize
+import numpy as np
+from sentence_transformers import SentenceTransformer
+
+
+model = SentenceTransformer("all-MiniLM-L6-v2")
 
 
 def split_into_sentences(text: str) -> list[str]:
@@ -11,42 +15,41 @@ def generate_basic_answer(question: str, relevant_chunks: list[dict]) -> str:
     if not relevant_chunks:
         return "I do not have enough information in the uploaded document to answer this question."
 
-    question_words = tokenize(question)
-    scored_sentences = []
+    candidate_sentences = []
 
     for chunk in relevant_chunks:
         sentences = split_into_sentences(chunk["text"])
+        candidate_sentences.extend(sentences)
 
-        for sentence in sentences:
-            sentence_words = tokenize(sentence)
-            score = len(question_words.intersection(sentence_words))
-
-            if score > 0:
-                scored_sentences.append({
-                    "sentence": sentence,
-                    "score": score
-                })
-
-    if not scored_sentences:
+    if not candidate_sentences:
         return (
             "Based on the uploaded document, I found relevant information, "
             "but I could not extract a short answer clearly."
         )
 
-    scored_sentences.sort(key=lambda item: item["score"], reverse=True)
+    question_embedding = model.encode(
+        question,
+        normalize_embeddings=True
+    )
+
+    sentence_embeddings = model.encode(
+        candidate_sentences,
+        normalize_embeddings=True
+    )
+
+    scores = np.dot(sentence_embeddings, question_embedding)
+
+    top_indexes = np.argsort(scores)[::-1][:1]
 
     selected_sentences = []
     seen_sentences = set()
 
-    for item in scored_sentences:
-        sentence = item["sentence"]
+    for index in top_indexes:
+        sentence = candidate_sentences[index]
 
         if sentence not in seen_sentences:
             selected_sentences.append(sentence)
             seen_sentences.add(sentence)
-
-        if len(selected_sentences) == 3:
-            break
 
     answer_text = " ".join(selected_sentences)
 

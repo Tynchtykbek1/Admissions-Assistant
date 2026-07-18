@@ -2,7 +2,11 @@ from fastapi import FastAPI, UploadFile, File
 from pathlib import Path
 from pydantic import BaseModel
 
-from document_processor import extract_text_from_txt, split_text_into_chunks
+from document_processor import (
+    extract_text_from_txt,
+    extract_text_from_pdf,
+    split_text_into_chunks
+)
 from retriever import find_relevant_chunks
 from answer_generator import generate_basic_answer
 
@@ -35,8 +39,16 @@ async def upload_document(file: UploadFile = File(...)):
     extracted_text = None
     chunks = []
 
-    if file_path.suffix == ".txt":
+    suffix = file_path.suffix.lower()
+
+    if suffix == ".txt":
+        
         extracted_text = extract_text_from_txt(file_path)
+
+    elif suffix == ".pdf":
+        extracted_text = extract_text_from_pdf(file_path)
+
+    if extracted_text:
         chunks = split_text_into_chunks(extracted_text)
 
         DOCUMENT_CHUNKS.clear()

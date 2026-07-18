@@ -1,4 +1,5 @@
 from pathlib import Path
+import pdfplumber
 
 
 def extract_text_from_txt(file_path: Path) -> str:
@@ -6,6 +7,20 @@ def extract_text_from_txt(file_path: Path) -> str:
         text = file.read()
 
     return text
+
+
+def extract_text_from_pdf(file_path: Path) -> str:
+    text = ""
+
+    with pdfplumber.open(file_path) as pdf:
+        for page in pdf.pages:
+            page_text = page.extract_text()
+
+            if page_text:
+                text += page_text + "\n"
+
+    return text
+
 
 def split_text_into_chunks(text: str, chunk_size: int = 120, overlap: int = 20) -> list[str]:
     words = text.split()

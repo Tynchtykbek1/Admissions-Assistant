@@ -3,3 +3,4 @@ uvicorn
 python-multipart
 pdfplumber
 sentence-transformers
+requests

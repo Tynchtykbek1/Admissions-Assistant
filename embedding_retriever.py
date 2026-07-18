@@ -1,17 +1,17 @@
-from sentence_transformers import SentenceTransformer
+from embedding_model import get_embedding_model
 import numpy as np
-
-
-model = SentenceTransformer("all-MiniLM-L6-v2")
 
 
 def find_relevant_chunks_semantic(
     question: str,
     chunks: list[dict],
-    top_k: int = 3
+    top_k: int = 3,
+    min_score: float = 0.30
 ) -> list[dict]:
     if not chunks:
         return []
+
+    model = get_embedding_model()
 
     question_embedding = model.encode(
         question,
@@ -32,13 +32,18 @@ def find_relevant_chunks_semantic(
     relevant_chunks = []
 
     for index in top_indexes:
+        score = float(scores[index])
+
+        if score < min_score:
+            continue
+
         chunk = chunks[index]
 
         relevant_chunks.append({
             "chunk_id": chunk["chunk_id"],
             "filename": chunk["filename"],
             "text": chunk["text"],
-            "score": float(scores[index])
+            "score": score
         })
 
     return relevant_chunks

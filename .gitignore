@@ -3,3 +3,4 @@ __pycache__/
 .env
 uploads/
 .pytest_cache/
+test_files/

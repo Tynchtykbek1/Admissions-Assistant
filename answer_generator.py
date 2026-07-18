@@ -1,9 +1,7 @@
 import re
 import numpy as np
 from sentence_transformers import SentenceTransformer
-
-
-model = SentenceTransformer("all-MiniLM-L6-v2")
+from embedding_model import get_embedding_model
 
 
 def split_into_sentences(text: str) -> list[str]:
@@ -12,6 +10,7 @@ def split_into_sentences(text: str) -> list[str]:
 
 
 def generate_basic_answer(question: str, relevant_chunks: list[dict]) -> str:
+    model = get_embedding_model()
     if not relevant_chunks:
         return "I do not have enough information in the uploaded document to answer this question."
 

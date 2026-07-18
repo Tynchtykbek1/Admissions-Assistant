@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from pathlib import Path
 from pydantic import BaseModel
 
@@ -31,6 +31,16 @@ def root():
 async def upload_document(file: UploadFile = File(...)):
     file_path = UPLOAD_DIR / file.filename
 
+    suffix = file_path.suffix.lower()
+
+    allowed_extensions = {".txt", ".pdf"}
+
+    if suffix not in allowed_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported file type. Please upload only .txt or .pdf files."
+        )
+
     content = await file.read()
 
     with open(file_path, "wb") as saved_file:
@@ -39,33 +49,35 @@ async def upload_document(file: UploadFile = File(...)):
     extracted_text = None
     chunks = []
 
-    suffix = file_path.suffix.lower()
-
     if suffix == ".txt":
-        
         extracted_text = extract_text_from_txt(file_path)
 
     elif suffix == ".pdf":
         extracted_text = extract_text_from_pdf(file_path)
 
-    if extracted_text:
-        chunks = split_text_into_chunks(extracted_text)
+    if not extracted_text:
+        raise HTTPException(
+            status_code=400,
+            detail="No readable text was found in the document. The file may be scanned or empty."
+        )
 
-        DOCUMENT_CHUNKS.clear()
+    chunks = split_text_into_chunks(extracted_text)
 
-        for index, chunk in enumerate(chunks):
-            DOCUMENT_CHUNKS.append({
-                "chunk_id": index,
-                "filename": file.filename,
-                "text": chunk
-            })
+    DOCUMENT_CHUNKS.clear()
+
+    for index, chunk in enumerate(chunks):
+        DOCUMENT_CHUNKS.append({
+            "chunk_id": index,
+            "filename": file.filename,
+            "text": chunk
+        })
 
     return {
         "filename": file.filename,
         "content_type": file.content_type,
         "size_bytes": len(content),
         "saved_to": str(file_path),
-        "text_length": len(extracted_text) if extracted_text else 0,
+        "text_length": len(extracted_text),
         "chunks_count": len(chunks),
         "first_chunk": chunks[0] if chunks else None
     }

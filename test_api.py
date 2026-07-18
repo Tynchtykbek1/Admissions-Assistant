@@ -53,7 +53,8 @@ TEST_QUESTIONS = [
     },
     {
         "question": "Can I study medicine in Canada?",
-        "expected_contains": "not enough information"
+        "expected_contains": "not enough information",
+        "expected_empty_sources": True
     }
 ]
 
@@ -99,16 +100,19 @@ def ask_question(question: str) -> dict:
     return response.json()
 
 
+def normalize_text(text: str) -> str:
+    return " ".join(text.casefold().split())
+
 def run_tests():
     print("\nRunning API tests...")
 
     for test_case in TEST_QUESTIONS:
         question = test_case["question"]
-        expected = test_case["expected_contains"].lower()
+        expected = normalize_text(test_case["expected_contains"])
 
         result = ask_question(question)
         answer = result["answer"]
-        answer_lower = answer.lower()
+        answer_normalized = normalize_text(answer)
 
         print("\nQuestion:")
         print(question)
@@ -116,11 +120,17 @@ def run_tests():
         print("Answer:")
         print(answer)
 
-        if expected in answer_lower:
-            print("Result: PASS")
+        if expected in answer_normalized:
+            answer_matches = True
         else:
-            print("Result: FAIL")
+            answer_matches = False
             print(f"Expected answer to contain: {test_case['expected_contains']}")
+
+        sources_match = not test_case.get("expected_empty_sources") or not result["sources"]
+        if not sources_match:
+            print("Expected sources to be empty.")
+
+        print(f"Result: {'PASS' if answer_matches and sources_match else 'FAIL'}")
 
 
 def main():

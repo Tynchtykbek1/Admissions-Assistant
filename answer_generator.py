@@ -1,6 +1,5 @@
 import re
 import numpy as np
-from sentence_transformers import SentenceTransformer
 from embedding_model import get_embedding_model
 
 
@@ -10,9 +9,8 @@ def split_into_sentences(text: str) -> list[str]:
 
 
 def generate_basic_answer(question: str, relevant_chunks: list[dict]) -> str:
-    model = get_embedding_model()
     if not relevant_chunks:
-        return "I do not have enough information in the uploaded document to answer this question."
+        return "There is not enough information in the uploaded document to answer this question."
 
     candidate_sentences = []
 
@@ -25,6 +23,8 @@ def generate_basic_answer(question: str, relevant_chunks: list[dict]) -> str:
             "Based on the uploaded document, I found relevant information, "
             "but I could not extract a short answer clearly."
         )
+
+    model = get_embedding_model()
 
     question_embedding = model.encode(
         question,

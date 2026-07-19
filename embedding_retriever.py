@@ -18,12 +18,9 @@ def find_relevant_chunks_semantic(
         normalize_embeddings=True
     )
 
-    chunk_texts = [chunk["text"] for chunk in chunks]
-
-    chunk_embeddings = model.encode(
-        chunk_texts,
-        normalize_embeddings=True
-    )
+    chunk_embeddings = np.stack([
+        chunk["embedding"] for chunk in chunks
+    ])
 
     scores = np.dot(chunk_embeddings, question_embedding)
 

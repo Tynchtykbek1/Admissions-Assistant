@@ -9,6 +9,7 @@ from document_processor import (
 )
 from retriever import find_relevant_chunks
 from answer_generator import generate_basic_answer
+from embedding_model import get_embedding_model
 from embedding_retriever import find_relevant_chunks_semantic
 
 app = FastAPI(title="Admissions RAG Assistant")
@@ -95,13 +96,20 @@ async def upload_document(file: UploadFile = File(...)):
 
     chunks = split_text_into_chunks(extracted_text)
 
+    model = get_embedding_model()
+    chunk_embeddings = model.encode(
+        chunks,
+        normalize_embeddings=True
+    )
+
     DOCUMENT_CHUNKS.clear()
 
-    for index, chunk in enumerate(chunks):
+    for index, (chunk, embedding) in enumerate(zip(chunks, chunk_embeddings)):
         DOCUMENT_CHUNKS.append({
             "chunk_id": index,
             "filename": safe_filename,
-            "text": chunk
+            "text": chunk,
+            "embedding": embedding
         })
 
     return {

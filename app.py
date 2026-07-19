@@ -15,6 +15,12 @@ from answer_generator import generate_basic_answer
 from embedding_model import get_embedding_model
 from embedding_retriever import find_relevant_chunks_semantic
 from llm_answer_generator import generate_llm_answer
+from database import (
+    initialize_database,
+    insert_document,
+    insert_chunk,
+    load_latest_document
+)
 
 app = FastAPI(title="Admissions RAG Assistant")
 
@@ -24,7 +30,8 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 STATIC_DIR = Path("static")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-DOCUMENT_CHUNKS = []
+initialize_database()
+DOCUMENT_CHUNKS = load_latest_document()
 
 
 class QuestionRequest(BaseModel):
@@ -168,6 +175,11 @@ async def upload_document(file: UploadFile = File(...)):
         chunk["filename"] = safe_filename
         chunk["embedding"] = embedding
         DOCUMENT_CHUNKS.append(chunk)
+
+    document_id = insert_document(safe_filename, document_type)
+
+    for chunk in DOCUMENT_CHUNKS:
+        insert_chunk(document_id, chunk)
 
     response = {
         "filename": safe_filename,

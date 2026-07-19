@@ -175,11 +175,27 @@ def run_faq_test():
         raise AssertionError("FAQ answer should come from the answer section.")
 
 
+def run_database_restore_test():
+    from app import DOCUMENT_CHUNKS
+    from database import load_latest_document
+
+    DOCUMENT_CHUNKS.clear()
+    DOCUMENT_CHUNKS.extend(load_latest_document())
+
+    assert DOCUMENT_CHUNKS
+    assert DOCUMENT_CHUNKS[0]["filename"] == FAQ_TEST_FILE.name
+    assert DOCUMENT_CHUNKS[0]["embedding"]
+
+    print("\nSQLite restore test:")
+    print("Result: PASS")
+
+
 def main():
     create_test_file()
     upload_test_file()
     run_tests()
     run_faq_test()
+    run_database_restore_test()
 
 
 if __name__ == "__main__":

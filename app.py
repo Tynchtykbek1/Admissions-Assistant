@@ -1,4 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from pydantic import BaseModel, Field
 
@@ -17,6 +19,9 @@ app = FastAPI(title="Admissions RAG Assistant")
 
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
+
+STATIC_DIR = Path("static")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 DOCUMENT_CHUNKS = []
 
@@ -74,6 +79,11 @@ def build_llm_answer_response(question: str, relevant_chunks: list[dict]) -> dic
 @app.get("/")
 def root():
     return {"message": "Admissions RAG Assistant is running"}
+
+
+@app.get("/ui")
+def user_interface():
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.post("/upload")

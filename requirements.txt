@@ -7,3 +7,5 @@ requests
 openai
 python-dotenv
 google-genai
+httpx
+python-telegram-bot

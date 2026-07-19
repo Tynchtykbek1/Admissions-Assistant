@@ -14,7 +14,7 @@ from document_processor import (
 )
 from retriever import find_relevant_chunks
 from answer_generator import generate_basic_answer
-from embedding_model import get_embedding_model
+from embedding_model import get_embedding_model, get_embedding_model_name
 from embedding_retriever import find_relevant_chunks_semantic
 from llm_answer_generator import generate_llm_answer
 from database import (
@@ -185,7 +185,11 @@ async def upload_document(file: UploadFile = File(...)):
         chunk["embedding"] = embedding
         DOCUMENT_CHUNKS.append(chunk)
 
-    document_id = insert_document(safe_filename, document_type)
+    document_id = insert_document(
+        safe_filename,
+        document_type,
+        get_embedding_model_name()
+    )
 
     for chunk in DOCUMENT_CHUNKS:
         insert_chunk(document_id, chunk)

@@ -1,12 +1,9 @@
+import importlib
+import os
 from pathlib import Path
-import requests
+from tempfile import TemporaryDirectory
 
-
-BASE_URL = "http://127.0.0.1:8000"
-
-TEST_DIR = Path("test_files")
-TEST_FILE = TEST_DIR / "admissions_sample_document.txt"
-FAQ_TEST_FILE = TEST_DIR / "admissions_faq_document.txt"
+from fastapi.testclient import TestClient
 
 
 SAMPLE_DOCUMENT = """
@@ -29,17 +26,9 @@ Students should always check the official university website before applying.
 
 Tuition Fees:
 The estimated tuition fee is 3000 EUR per year.
-The final tuition amount may depend on the student’s family income, country of residence, and university regulations.
 
 Visa Documents:
 Non-EU students usually need a passport, admission letter, proof of financial means, accommodation proof, health insurance, and visa application form.
-The assistant must not guarantee visa approval because the final decision belongs to the embassy.
-
-Important Business Rules:
-The assistant must not promise guaranteed admission.
-The assistant must not promise guaranteed visa approval.
-The assistant must not invent deadlines, tuition fees, or scholarship conditions.
-If the answer is not available in the document, the assistant should say that there is not enough information and recommend contacting a human advisor.
 """
 
 
@@ -52,150 +41,104 @@ Visa applicants need a passport, admission letter, and proof of financial means.
 """
 
 
-TEST_QUESTIONS = [
-    {
-        "question": "What English level is required?",
-        "expected_contains": "IELTS 6.0"
-    },
-    {
-        "question": "What is the application deadline?",
-        "expected_contains": "30 April"
-    },
-    {
-        "question": "Can I study medicine in Canada?",
-        "expected_contains": "not enough information",
-        "expected_empty_sources": True
-    }
-]
-
-
-def create_test_file():
-    TEST_DIR.mkdir(exist_ok=True)
-
-    with open(TEST_FILE, "w", encoding="utf-8") as file:
-        file.write(SAMPLE_DOCUMENT.strip())
-
-    print(f"Created test file: {TEST_FILE}")
-
-
-def upload_test_file():
-    with open(TEST_FILE, "rb") as file:
-        files = {
-            "file": (TEST_FILE.name, file, "text/plain")
-        }
-
-        response = requests.post(
-            f"{BASE_URL}/upload",
-            files=files,
-            timeout=30
-        )
-
-    response.raise_for_status()
-    data = response.json()
-    assert data["document_type"] == "standard"
-
-    print("\nUpload result:")
-    print(f"Filename: {data['filename']}")
-    print(f"Text length: {data['text_length']}")
-    print(f"Chunks count: {data['chunks_count']}")
-
-
-def ask_question(question: str) -> dict:
-    response = requests.post(
-        f"{BASE_URL}/ask-semantic",
-        json={"question": question},
-        timeout=60
+def upload_text(client: TestClient, filename: str, text: str) -> dict:
+    response = client.post(
+        "/upload",
+        files={"file": (filename, text.encode("utf-8"), "text/plain")}
     )
-
     response.raise_for_status()
     return response.json()
 
 
-def normalize_text(text: str) -> str:
-    return " ".join(text.casefold().split())
-
-def run_tests():
-    print("\nRunning API tests...")
-
-    for test_case in TEST_QUESTIONS:
-        question = test_case["question"]
-        expected = normalize_text(test_case["expected_contains"])
-
-        result = ask_question(question)
-        answer = result["answer"]
-        answer_normalized = normalize_text(answer)
-
-        print("\nQuestion:")
-        print(question)
-
-        print("Answer:")
-        print(answer)
-
-        if expected in answer_normalized:
-            answer_matches = True
-        else:
-            answer_matches = False
-            print(f"Expected answer to contain: {test_case['expected_contains']}")
-
-        sources_match = not test_case.get("expected_empty_sources") or not result["sources"]
-        if not sources_match:
-            print("Expected sources to be empty.")
-
-        print(f"Result: {'PASS' if answer_matches and sources_match else 'FAIL'}")
-
-
-def run_faq_test():
-    with open(FAQ_TEST_FILE, "w", encoding="utf-8") as file:
-        file.write(FAQ_DOCUMENT.strip())
-
-    with open(FAQ_TEST_FILE, "rb") as file:
-        response = requests.post(
-            f"{BASE_URL}/upload",
-            files={"file": (FAQ_TEST_FILE.name, file, "text/plain")},
-            timeout=30
-        )
-
+def ask_semantic(client: TestClient, question: str) -> dict:
+    response = client.post(
+        "/ask-semantic",
+        json={"question": question}
+    )
     response.raise_for_status()
-    upload_result = response.json()
+    return response.json()
+
+
+def run_standard_document_tests(client: TestClient) -> None:
+    upload_result = upload_text(
+        client,
+        "admissions_sample_document.txt",
+        SAMPLE_DOCUMENT.strip()
+    )
+    assert upload_result["document_type"] == "standard"
+
+    test_cases = [
+        ("What English level is required?", "IELTS 6.0"),
+        ("What is the application deadline?", "30 April")
+    ]
+
+    for question, expected in test_cases:
+        result = ask_semantic(client, question)
+        assert expected.casefold() in result["answer"].casefold()
+
+    unrelated = ask_semantic(client, "Can I study medicine in Canada?")
+    assert "not enough information" in unrelated["answer"].casefold()
+    assert unrelated["sources"] == []
+
+    print("Standard document API tests: PASS")
+
+
+def run_faq_test(client: TestClient) -> None:
+    upload_result = upload_text(
+        client,
+        "admissions_faq_document.txt",
+        FAQ_DOCUMENT.strip()
+    )
     assert upload_result["document_type"] == "faq"
     assert upload_result["entries_count"] == upload_result["chunks_count"]
 
-    result = ask_question("Do I have guaranteed admission?")
-    answer = normalize_text(result["answer"])
-    answer_is_from_answer_section = (
-        "admission is never guaranteed" in answer
-        and "is admission guaranteed?" not in answer
-    )
+    result = ask_semantic(client, "Do I have guaranteed admission?")
+    answer = result["answer"].casefold()
+    assert "admission is never guaranteed" in answer
+    assert "is admission guaranteed?" not in answer
 
-    print("\nFAQ-style document test:")
-    print(result["answer"])
-    print(f"Result: {'PASS' if answer_is_from_answer_section else 'FAIL'}")
-
-    if not answer_is_from_answer_section:
-        raise AssertionError("FAQ answer should come from the answer section.")
+    print("FAQ-style document API test: PASS")
 
 
-def run_database_restore_test():
-    from app import DOCUMENT_CHUNKS
-    from database import load_latest_document
+def run_database_restore_test(app_module, database_module, temporary_db: Path) -> None:
+    app_module.DOCUMENT_CHUNKS.clear()
+    app_module.DOCUMENT_CHUNKS.extend(database_module.load_latest_document())
 
-    DOCUMENT_CHUNKS.clear()
-    DOCUMENT_CHUNKS.extend(load_latest_document())
+    assert temporary_db.exists()
+    assert temporary_db.resolve() != Path("admissions.db").resolve()
+    assert app_module.DOCUMENT_CHUNKS
+    assert app_module.DOCUMENT_CHUNKS[0]["filename"] == "admissions_faq_document.txt"
+    assert len(app_module.DOCUMENT_CHUNKS[0]["embedding"]) > 0
 
-    assert DOCUMENT_CHUNKS
-    assert DOCUMENT_CHUNKS[0]["filename"] == FAQ_TEST_FILE.name
-    assert DOCUMENT_CHUNKS[0]["embedding"]
-
-    print("\nSQLite restore test:")
-    print("Result: PASS")
+    print("Temporary SQLite restore test: PASS")
 
 
-def main():
-    create_test_file()
-    upload_test_file()
-    run_tests()
-    run_faq_test()
-    run_database_restore_test()
+def main() -> None:
+    original_database_path = os.environ.get("DATABASE_PATH")
+
+    with TemporaryDirectory() as temporary_directory:
+        temporary_db = Path(temporary_directory) / "test_admissions.db"
+        os.environ["DATABASE_PATH"] = str(temporary_db)
+
+        import database
+        import app
+
+        database = importlib.reload(database)
+        app = importlib.reload(app)
+
+        with TestClient(app.app) as client:
+            run_standard_document_tests(client)
+            run_faq_test(client)
+            run_database_restore_test(app, database, temporary_db)
+            app.DOCUMENT_CHUNKS.clear()
+
+    if original_database_path is None:
+        os.environ.pop("DATABASE_PATH", None)
+    else:
+        os.environ["DATABASE_PATH"] = original_database_path
+
+    assert not temporary_db.exists()
+    print("Temporary database cleanup: PASS")
 
 
 if __name__ == "__main__":

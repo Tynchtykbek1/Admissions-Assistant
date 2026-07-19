@@ -25,7 +25,7 @@ def extract_text_from_pdf(file_path: Path) -> str:
 
 def parse_faq_entries(text: str) -> list[dict]:
     question_pattern = re.compile(
-        r"(?m)^\s*(\d+)[.)]\s*(.+?\?)\s*$"
+        r"(?m)^\s*(\d+)[.)]\s*(.*\?.*)\s*$"
     )
     matches = list(question_pattern.finditer(text))
     faq_entries = []

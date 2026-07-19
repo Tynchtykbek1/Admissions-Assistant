@@ -11,6 +11,7 @@ from retriever import find_relevant_chunks
 from answer_generator import generate_basic_answer
 from embedding_model import get_embedding_model
 from embedding_retriever import find_relevant_chunks_semantic
+from llm_answer_generator import generate_llm_answer
 
 app = FastAPI(title="Admissions RAG Assistant")
 
@@ -26,6 +27,29 @@ class QuestionRequest(BaseModel):
 
 def build_answer_response(question: str, relevant_chunks: list[dict]) -> dict:
     answer = generate_basic_answer(
+        question=question,
+        relevant_chunks=relevant_chunks
+    )
+
+    sources = [
+        {
+            "chunk_id": chunk["chunk_id"],
+            "filename": chunk["filename"],
+            "score": chunk["score"],
+            "preview": chunk["text"][:200]
+        }
+        for chunk in relevant_chunks
+    ]
+
+    return {
+        "question": question,
+        "answer": answer,
+        "sources": sources
+    }
+
+
+def build_llm_answer_response(question: str, relevant_chunks: list[dict]) -> dict:
+    answer = generate_llm_answer(
         question=question,
         relevant_chunks=relevant_chunks
     )
@@ -141,3 +165,14 @@ def ask_question_semantic(request: QuestionRequest):
     )
 
     return build_answer_response(request.question, relevant_chunks)
+
+
+@app.post("/ask-llm")
+def ask_question_llm(request: QuestionRequest):
+    relevant_chunks = find_relevant_chunks_semantic(
+        question=request.question,
+        chunks=DOCUMENT_CHUNKS,
+        top_k=3
+    )
+
+    return build_llm_answer_response(request.question, relevant_chunks)

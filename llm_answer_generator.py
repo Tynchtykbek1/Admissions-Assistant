@@ -23,11 +23,16 @@ def build_context(relevant_chunks: list[dict]) -> str:
     context_parts = []
 
     for source_number, chunk in enumerate(relevant_chunks, start=1):
+        identifier = (
+            f"FAQ ID: {chunk['faq_id']}"
+            if "faq_id" in chunk
+            else f"Chunk ID: {chunk['chunk_id']}"
+        )
         context_parts.append(
-            f"[Source {source_number}]\n"
-            f"filename: {chunk['filename']}\n"
-            f"chunk_id: {chunk['chunk_id']}\n"
-            f"text: {chunk['text']}"
+            f"Source {source_number}:\n"
+            f"Filename: {chunk['filename']}\n"
+            f"{identifier}\n"
+            f"Content:\n{chunk['text']}"
         )
 
     return "\n\n".join(context_parts)

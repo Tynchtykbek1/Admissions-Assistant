@@ -6,7 +6,8 @@ def find_relevant_chunks_semantic(
     question: str,
     chunks: list[dict],
     top_k: int = 3,
-    min_score: float = 0.30
+    min_score: float = 0.30,
+    min_context_chunks: int = 0
 ) -> list[dict]:
     if not chunks:
         return []
@@ -36,11 +37,45 @@ def find_relevant_chunks_semantic(
 
         chunk = chunks[index]
 
-        relevant_chunks.append({
+        result = {
             "chunk_id": chunk["chunk_id"],
             "filename": chunk["filename"],
             "text": chunk["text"],
-            "score": score
-        })
+            "score": score,
+            "retrieval_fallback": False
+        }
+
+        if "faq_id" in chunk:
+            result["faq_id"] = chunk["faq_id"]
+
+        relevant_chunks.append(result)
+
+    fallback_limit = min(min_context_chunks, top_k, len(chunks))
+
+    if len(relevant_chunks) < fallback_limit:
+        existing_ids = {chunk["chunk_id"] for chunk in relevant_chunks}
+
+        for index in top_indexes:
+            chunk = chunks[index]
+
+            if chunk["chunk_id"] in existing_ids:
+                continue
+
+            result = {
+                "chunk_id": chunk["chunk_id"],
+                "filename": chunk["filename"],
+                "text": chunk["text"],
+                "score": float(scores[index]),
+                "retrieval_fallback": True
+            }
+
+            if "faq_id" in chunk:
+                result["faq_id"] = chunk["faq_id"]
+
+            relevant_chunks.append(result)
+            existing_ids.add(chunk["chunk_id"])
+
+            if len(relevant_chunks) == fallback_limit:
+                break
 
     return relevant_chunks

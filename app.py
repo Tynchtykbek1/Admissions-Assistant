@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -21,6 +23,14 @@ from database import (
     insert_chunk,
     load_latest_document
 )
+from retrieval_settings import (
+    SEMANTIC_TOP_K,
+    SEMANTIC_SCORE_THRESHOLD,
+    LLM_MIN_CONTEXT_CHUNKS
+)
+
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Admissions RAG Assistant")
 
@@ -38,26 +48,35 @@ class QuestionRequest(BaseModel):
     question: str = Field(min_length=1)
 
 
+def build_sources(relevant_chunks: list[dict]) -> list[dict]:
+    sources = []
+
+    for chunk in relevant_chunks:
+        source = {
+            "chunk_id": chunk["chunk_id"],
+            "filename": chunk["filename"],
+            "score": chunk["score"],
+            "preview": chunk["text"][:200]
+        }
+
+        if "faq_id" in chunk:
+            source["faq_id"] = chunk["faq_id"]
+
+        sources.append(source)
+
+    return sources
+
+
 def build_answer_response(question: str, relevant_chunks: list[dict]) -> dict:
     answer = generate_basic_answer(
         question=question,
         relevant_chunks=relevant_chunks
     )
 
-    sources = [
-        {
-            "chunk_id": chunk["chunk_id"],
-            "filename": chunk["filename"],
-            "score": chunk["score"],
-            "preview": chunk["text"][:200]
-        }
-        for chunk in relevant_chunks
-    ]
-
     return {
         "question": question,
         "answer": answer,
-        "sources": sources
+        "sources": build_sources(relevant_chunks)
     }
 
 
@@ -67,20 +86,10 @@ def build_llm_answer_response(question: str, relevant_chunks: list[dict]) -> dic
         relevant_chunks=relevant_chunks
     )
 
-    sources = [
-        {
-            "chunk_id": chunk["chunk_id"],
-            "filename": chunk["filename"],
-            "score": chunk["score"],
-            "preview": chunk["text"][:200]
-        }
-        for chunk in relevant_chunks
-    ]
-
     return {
         "question": question,
         "answer": answer,
-        "sources": sources
+        "sources": build_sources(relevant_chunks)
     }
 
 
@@ -212,7 +221,8 @@ def ask_question_semantic(request: QuestionRequest):
     relevant_chunks = find_relevant_chunks_semantic(
         question=request.question,
         chunks=DOCUMENT_CHUNKS,
-        top_k=3
+        top_k=SEMANTIC_TOP_K,
+        min_score=max(SEMANTIC_SCORE_THRESHOLD, 0.30)
     )
 
     return build_answer_response(request.question, relevant_chunks)
@@ -223,7 +233,17 @@ def ask_question_llm(request: QuestionRequest):
     relevant_chunks = find_relevant_chunks_semantic(
         question=request.question,
         chunks=DOCUMENT_CHUNKS,
-        top_k=3
+        top_k=SEMANTIC_TOP_K,
+        min_score=SEMANTIC_SCORE_THRESHOLD,
+        min_context_chunks=LLM_MIN_CONTEXT_CHUNKS
+    )
+
+    logger.info(
+        "LLM retrieval question=%r chunks=%d scores=%s fallback=%s",
+        request.question,
+        len(relevant_chunks),
+        [round(chunk["score"], 3) for chunk in relevant_chunks],
+        any(chunk["retrieval_fallback"] for chunk in relevant_chunks)
     )
 
     return build_llm_answer_response(request.question, relevant_chunks)

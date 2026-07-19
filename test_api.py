@@ -6,6 +6,7 @@ BASE_URL = "http://127.0.0.1:8000"
 
 TEST_DIR = Path("test_files")
 TEST_FILE = TEST_DIR / "admissions_sample_document.txt"
+FAQ_TEST_FILE = TEST_DIR / "admissions_faq_document.txt"
 
 
 SAMPLE_DOCUMENT = """
@@ -39,6 +40,15 @@ The assistant must not promise guaranteed admission.
 The assistant must not promise guaranteed visa approval.
 The assistant must not invent deadlines, tuition fees, or scholarship conditions.
 If the answer is not available in the document, the assistant should say that there is not enough information and recommend contacting a human advisor.
+"""
+
+
+FAQ_DOCUMENT = """
+1. Is admission guaranteed?
+Admission is never guaranteed. The university makes the final decision after reviewing the application.
+
+2. Which documents are required for the visa?
+Visa applicants need a passport, admission letter, and proof of financial means.
 """
 
 
@@ -133,10 +143,38 @@ def run_tests():
         print(f"Result: {'PASS' if answer_matches and sources_match else 'FAIL'}")
 
 
+def run_faq_test():
+    with open(FAQ_TEST_FILE, "w", encoding="utf-8") as file:
+        file.write(FAQ_DOCUMENT.strip())
+
+    with open(FAQ_TEST_FILE, "rb") as file:
+        response = requests.post(
+            f"{BASE_URL}/upload",
+            files={"file": (FAQ_TEST_FILE.name, file, "text/plain")},
+            timeout=30
+        )
+
+    response.raise_for_status()
+    result = ask_question("Do I have guaranteed admission?")
+    answer = normalize_text(result["answer"])
+    answer_is_from_answer_section = (
+        "admission is never guaranteed" in answer
+        and "is admission guaranteed?" not in answer
+    )
+
+    print("\nFAQ-style document test:")
+    print(result["answer"])
+    print(f"Result: {'PASS' if answer_is_from_answer_section else 'FAIL'}")
+
+    if not answer_is_from_answer_section:
+        raise AssertionError("FAQ answer should come from the answer section.")
+
+
 def main():
     create_test_file()
     upload_test_file()
     run_tests()
+    run_faq_test()
 
 
 if __name__ == "__main__":

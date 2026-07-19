@@ -27,7 +27,8 @@ def find_relevant_chunks(question: str, chunks: list[dict], top_k: int = 3) -> l
     scored_chunks = []
 
     for chunk in chunks:
-        chunk_words = tokenize(chunk["text"])
+        retrieval_text = chunk.get("text_for_retrieval", chunk["text"])
+        chunk_words = tokenize(retrieval_text)
         score = len(question_words.intersection(chunk_words))
 
         if score > 0:

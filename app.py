@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from document_processor import (
     extract_text_from_txt,
     extract_text_from_pdf,
+    parse_faq_entries,
     split_text_into_chunks
 )
 from retriever import find_relevant_chunks
@@ -128,23 +129,43 @@ async def upload_document(file: UploadFile = File(...)):
             detail="No readable text was found in the document. The file may be scanned or empty."
         )
 
-    chunks = split_text_into_chunks(extracted_text)
+    faq_entries = parse_faq_entries(extracted_text)
+
+    if faq_entries:
+        document_chunks = [
+            {
+                "chunk_id": entry["faq_id"],
+                "faq_id": entry["faq_id"],
+                "question": entry["question"],
+                "answer": entry["answer"],
+                "text_for_retrieval": entry["text_for_retrieval"],
+                "text": entry["text"]
+            }
+            for entry in faq_entries
+        ]
+    else:
+        chunks = split_text_into_chunks(extracted_text)
+        document_chunks = [
+            {
+                "chunk_id": index,
+                "text_for_retrieval": chunk,
+                "text": chunk
+            }
+            for index, chunk in enumerate(chunks)
+        ]
 
     model = get_embedding_model()
     chunk_embeddings = model.encode(
-        chunks,
+        [chunk["text_for_retrieval"] for chunk in document_chunks],
         normalize_embeddings=True
     )
 
     DOCUMENT_CHUNKS.clear()
 
-    for index, (chunk, embedding) in enumerate(zip(chunks, chunk_embeddings)):
-        DOCUMENT_CHUNKS.append({
-            "chunk_id": index,
-            "filename": safe_filename,
-            "text": chunk,
-            "embedding": embedding
-        })
+    for chunk, embedding in zip(document_chunks, chunk_embeddings):
+        chunk["filename"] = safe_filename
+        chunk["embedding"] = embedding
+        DOCUMENT_CHUNKS.append(chunk)
 
     return {
         "filename": safe_filename,
@@ -152,8 +173,8 @@ async def upload_document(file: UploadFile = File(...)):
         "size_bytes": len(content),
         "saved_to": str(file_path),
         "text_length": len(extracted_text),
-        "chunks_count": len(chunks),
-        "first_chunk": chunks[0] if chunks else None
+        "chunks_count": len(document_chunks),
+        "first_chunk": document_chunks[0]["text"] if document_chunks else None
     }
 
 

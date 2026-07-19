@@ -3,6 +3,7 @@ const uploadButton = document.querySelector("#upload-button");
 const uploadStatus = document.querySelector("#upload-status");
 const currentDocument = document.querySelector("#current-document");
 const currentFilename = document.querySelector("#current-filename");
+const currentDocumentType = document.querySelector("#current-document-type");
 const currentChunks = document.querySelector("#current-chunks");
 const questionInput = document.querySelector("#question");
 const answerMode = document.querySelector("#answer-mode");
@@ -59,9 +60,12 @@ uploadButton.addEventListener("click", async () => {
 
         const result = await response.json();
         documentUploaded = true;
-        uploadStatus.textContent = `Uploaded ${result.filename}. Text length: ${result.text_length}. Chunks: ${result.chunks_count}.`;
+        const typeLabel = result.document_type === "faq" ? "FAQ" : "Standard";
+        const itemCount = result.entries_count ?? result.chunks_count;
+        uploadStatus.textContent = `Uploaded ${result.filename}. Text length: ${result.text_length}. Chunks / entries: ${itemCount}.`;
         currentFilename.textContent = result.filename;
-        currentChunks.textContent = result.chunks_count;
+        currentDocumentType.textContent = typeLabel;
+        currentChunks.textContent = itemCount;
         currentDocument.hidden = false;
     } catch (error) {
         showError(uploadStatus, error.message);

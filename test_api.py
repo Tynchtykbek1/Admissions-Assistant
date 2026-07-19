@@ -92,6 +92,7 @@ def upload_test_file():
 
     response.raise_for_status()
     data = response.json()
+    assert data["document_type"] == "standard"
 
     print("\nUpload result:")
     print(f"Filename: {data['filename']}")
@@ -155,6 +156,10 @@ def run_faq_test():
         )
 
     response.raise_for_status()
+    upload_result = response.json()
+    assert upload_result["document_type"] == "faq"
+    assert upload_result["entries_count"] == upload_result["chunks_count"]
+
     result = ask_question("Do I have guaranteed admission?")
     answer = normalize_text(result["answer"])
     answer_is_from_answer_section = (

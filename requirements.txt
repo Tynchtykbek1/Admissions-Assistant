@@ -6,3 +6,4 @@ sentence-transformers
 requests
 openai
 python-dotenv
+google-genai

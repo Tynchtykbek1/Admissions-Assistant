@@ -14,8 +14,9 @@ RAG_INSTRUCTIONS = (
     "Answer the user's question only using the provided context. "
     "If the context does not contain the answer, say there is not enough "
     "information in the uploaded document. Do not invent admissions requirements, "
-    "deadlines, scholarships, visas, or university policies. Keep the answer clear "
-    "and concise."
+    "deadlines, scholarships, visas, or university policies. Keep the answer concise "
+    "for a messaging app: give the answer directly, use about 3–5 short bullet points "
+    "when a list is useful, and retain important dates, requirements, and warnings."
 )
 
 

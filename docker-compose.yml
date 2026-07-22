@@ -1,0 +1,45 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: admissions-rag-assistant:local
+    env_file:
+      - .env
+    environment:
+      DATABASE_PATH: /data/admissions.db
+      HF_HOME: /home/appuser/.cache/huggingface
+    ports:
+      - "8000:8000"
+    volumes:
+      - admissions_data:/data
+      - uploaded_documents:/app/uploads
+      - huggingface_cache:/home/appuser/.cache/huggingface
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    restart: unless-stopped
+
+  telegram-bot:
+    image: admissions-rag-assistant:local
+    env_file:
+      - .env
+    environment:
+      BACKEND_URL: http://backend:8000
+    command: ["python", "telegram_bot.py"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  admissions_data:
+  uploaded_documents:
+  huggingface_cache:

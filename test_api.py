@@ -83,6 +83,13 @@ def run_standard_document_tests(client: TestClient) -> None:
     print("Standard document API tests: PASS")
 
 
+def run_health_test(client: TestClient) -> None:
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    print("Health endpoint test: PASS")
+
+
 def run_faq_test(client: TestClient) -> None:
     upload_result = upload_text(
         client,
@@ -127,6 +134,7 @@ def main() -> None:
         app = importlib.reload(app)
 
         with TestClient(app.app) as client:
+            run_health_test(client)
             run_standard_document_tests(client)
             run_faq_test(client)
             run_database_restore_test(app, database, temporary_db)

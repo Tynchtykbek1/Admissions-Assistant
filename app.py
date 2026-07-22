@@ -102,6 +102,11 @@ def root():
     return {"message": "Admissions RAG Assistant is running"}
 
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 @app.get("/ui")
 def user_interface():
     return FileResponse(STATIC_DIR / "index.html")

@@ -1,5 +1,38 @@
 from embedding_model import get_embedding_model
 import numpy as np
+import re
+
+
+EXACT_FAQ_MATCH_BOOST = 2.01
+PARTIAL_FAQ_MATCH_BOOST = 0.15
+
+
+def normalize_faq_question(text: str) -> str:
+    """Normalize a user or FAQ question for deterministic FAQ matching."""
+    without_parentheses = re.sub(r"\([^)]*\)", " ", text.casefold())
+    letters_and_numbers = re.sub(r"[^\w]+", " ", without_parentheses, flags=re.UNICODE)
+    return " ".join(letters_and_numbers.split())
+
+
+def get_faq_match(query: str, chunk: dict) -> tuple[str | None, float]:
+    if "faq_id" not in chunk or not chunk.get("question"):
+        return None, 0.0
+
+    normalized_query = normalize_faq_question(query)
+    normalized_question = normalize_faq_question(chunk["question"])
+
+    if not normalized_query or not normalized_question:
+        return None, 0.0
+    if normalized_query == normalized_question:
+        return "exact", EXACT_FAQ_MATCH_BOOST
+    if (
+        normalized_query.startswith(normalized_question)
+        or normalized_question.startswith(normalized_query)
+        or normalized_query in normalized_question
+        or normalized_question in normalized_query
+    ):
+        return "partial", PARTIAL_FAQ_MATCH_BOOST
+    return None, 0.0
 
 
 def find_relevant_chunks_semantic(
@@ -25,15 +58,31 @@ def find_relevant_chunks_semantic(
 
     scores = np.dot(chunk_embeddings, question_embedding)
 
-    top_indexes = np.argsort(scores)[::-1][:top_k]
+    ranked_candidates = []
+
+    for index, semantic_score in enumerate(scores):
+        match_type, match_boost = get_faq_match(question, chunks[index])
+        ranked_candidates.append({
+            "index": index,
+            "score": float(semantic_score),
+            "faq_match_type": match_type,
+            "faq_match_boost": match_boost,
+            "final_score": float(semantic_score) + match_boost
+        })
+
+    ranked_candidates.sort(key=lambda candidate: candidate["final_score"], reverse=True)
+    eligible_candidates = [
+        candidate
+        for candidate in ranked_candidates
+        if candidate["score"] >= min_score or candidate["faq_match_type"] == "exact"
+    ]
+    top_candidates = eligible_candidates[:top_k]
 
     relevant_chunks = []
 
-    for index in top_indexes:
-        score = float(scores[index])
-
-        if score < min_score:
-            continue
+    for candidate in top_candidates:
+        index = candidate["index"]
+        score = candidate["score"]
 
         chunk = chunks[index]
 
@@ -42,6 +91,9 @@ def find_relevant_chunks_semantic(
             "filename": chunk["filename"],
             "text": chunk["text"],
             "score": score,
+            "faq_match_type": candidate["faq_match_type"],
+            "faq_match_boost": candidate["faq_match_boost"],
+            "final_score": candidate["final_score"],
             "retrieval_fallback": False
         }
 
@@ -55,7 +107,8 @@ def find_relevant_chunks_semantic(
     if len(relevant_chunks) < fallback_limit:
         existing_ids = {chunk["chunk_id"] for chunk in relevant_chunks}
 
-        for index in top_indexes:
+        for candidate in ranked_candidates:
+            index = candidate["index"]
             chunk = chunks[index]
 
             if chunk["chunk_id"] in existing_ids:
@@ -65,7 +118,10 @@ def find_relevant_chunks_semantic(
                 "chunk_id": chunk["chunk_id"],
                 "filename": chunk["filename"],
                 "text": chunk["text"],
-                "score": float(scores[index]),
+                "score": candidate["score"],
+                "faq_match_type": candidate["faq_match_type"],
+                "faq_match_boost": candidate["faq_match_boost"],
+                "final_score": candidate["final_score"],
                 "retrieval_fallback": True
             }
 

@@ -59,6 +59,10 @@ def build_sources(relevant_chunks: list[dict]) -> list[dict]:
             "preview": chunk["text"][:200]
         }
 
+        for diagnostic in ("faq_match_type", "faq_match_boost", "final_score"):
+            if diagnostic in chunk:
+                source[diagnostic] = chunk[diagnostic]
+
         if "faq_id" in chunk:
             source["faq_id"] = chunk["faq_id"]
 

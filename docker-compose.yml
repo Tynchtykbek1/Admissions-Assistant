@@ -10,7 +10,7 @@ services:
       DATABASE_PATH: /data/admissions.db
       HF_HOME: /home/appuser/.cache/huggingface
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - admissions_data:/data
       - uploaded_documents:/app/uploads

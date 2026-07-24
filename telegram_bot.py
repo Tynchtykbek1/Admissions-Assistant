@@ -1,3 +1,4 @@
+import asyncio
 import html
 import logging
 import os
@@ -8,12 +9,14 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from logging_config import configure_logging
 
 
 load_dotenv()
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
 MAX_MESSAGE_LENGTH = 4000
+TYPING_INTERVAL_SECONDS = 4.0
 
 GREETINGS = {
     "ru": {
@@ -94,13 +97,22 @@ ERROR_MESSAGES = {
     "en": "I couldn't get an answer right now. Please try again a little later.",
 }
 
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
+PROVIDER_UNAVAILABLE_MESSAGES = {
+    "ru": "Сервис временно перегружен. Попробуйте повторить вопрос через несколько минут.",
+    "en": "The service is temporarily unavailable. Please try again in a few minutes.",
+}
+
+configure_logging()
 logger = logging.getLogger(__name__)
 
 
 async def ask_backend(question: str) -> dict:
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(f"{BACKEND_URL}/ask-llm", json={"question": question})
+        if response.status_code == 503:
+            result = response.json()
+            if isinstance(result, dict) and result.get("status") == "provider_unavailable":
+                return result
         response.raise_for_status()
         return response.json()
 
@@ -132,6 +144,7 @@ def greeting_language(text: str) -> str | None:
 
 def sanitize_for_html(text: str) -> str:
     """Remove common Markdown decoration, then escape all backend-controlled text."""
+    text = re.sub(r"(?m)^([ \t]*)\*(?=[ \t]+)", r"\1•", text)
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.DOTALL)
     text = re.sub(r"__(.+?)__", r"\1", text, flags=re.DOTALL)
     text = re.sub(r"`{1,3}(.+?)`{1,3}", r"\1", text, flags=re.DOTALL)
@@ -151,6 +164,8 @@ def is_no_information_answer(answer: str) -> bool:
 def format_backend_response(result: dict, language: str = "en") -> str:
     if not isinstance(result, dict):
         raise ValueError("The backend returned an invalid response.")
+    if result.get("status") == "provider_unavailable":
+        return PROVIDER_UNAVAILABLE_MESSAGES[language]
 
     answer = result.get("answer")
     if not isinstance(answer, str) or not answer.strip():
@@ -222,6 +237,29 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await send_html(update.message, HELP_MESSAGES[user_command_language(update)])
 
 
+async def keep_typing(chat) -> None:
+    try:
+        while True:
+            try:
+                await chat.send_action(action=ChatAction.TYPING)
+            except Exception:
+                logger.warning("Telegram typing action failed.")
+                return
+            await asyncio.sleep(TYPING_INTERVAL_SECONDS)
+    except asyncio.CancelledError:
+        raise
+
+
+async def stop_typing(task: asyncio.Task | None) -> None:
+    if task is None:
+        return
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
 async def handle_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.text:
         return
@@ -233,16 +271,28 @@ async def handle_question(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     language = detect_text_language(question)
-    if update.effective_chat:
-        await update.effective_chat.send_action(action=ChatAction.TYPING)
+    typing_task = (
+        asyncio.create_task(keep_typing(update.effective_chat))
+        if update.effective_chat
+        else None
+    )
 
     try:
-        result = await ask_backend(question)
+        try:
+            if typing_task is not None:
+                # Give the background task one event-loop turn for the first action.
+                await asyncio.sleep(0)
+            result = await ask_backend(question)
+        finally:
+            await stop_typing(typing_task)
         final_text = format_backend_response(result, language)
         for part in split_message(final_text):
             await send_html(update.message, part)
-    except (httpx.HTTPError, ValueError, TypeError):
-        logger.exception("Could not get an answer from the FastAPI backend.")
+    except (httpx.HTTPError, ValueError, TypeError) as error:
+        logger.warning(
+            "Could not get an answer from the FastAPI backend category=%s.",
+            type(error).__name__,
+        )
         await send_html(update.message, ERROR_MESSAGES[language])
 
 
@@ -256,7 +306,7 @@ def main() -> None:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_question))
 
-    print("Telegram bot is running with long polling...")
+    logger.info("Telegram bot is running with long polling.")
     application.run_polling()
 
 

@@ -1,7 +1,9 @@
 import logging
+import time
+import uuid
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -15,8 +17,9 @@ from document_processor import (
 from retriever import find_relevant_chunks
 from answer_generator import generate_basic_answer
 from embedding_model import get_embedding_model, get_embedding_model_name
-from embedding_retriever import find_relevant_chunks_semantic
-from llm_answer_generator import generate_llm_answer
+from embedding_retriever import find_relevant_chunks_semantic, normalize_retrieval_query
+from llm_answer_generator import PROVIDER_UNAVAILABLE, generate_llm_answer
+from logging_config import configure_logging, safe_log_text
 from database import (
     initialize_database,
     insert_document,
@@ -30,6 +33,7 @@ from retrieval_settings import (
 )
 
 
+configure_logging()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Admissions RAG Assistant")
@@ -85,15 +89,18 @@ def build_answer_response(question: str, relevant_chunks: list[dict]) -> dict:
 
 
 def build_llm_answer_response(question: str, relevant_chunks: list[dict]) -> dict:
-    answer = generate_llm_answer(
+    result = generate_llm_answer(
         question=question,
         relevant_chunks=relevant_chunks
     )
 
     return {
         "question": question,
-        "answer": answer,
-        "sources": build_sources(relevant_chunks)
+        "answer": result.answer,
+        "sources": build_sources(relevant_chunks),
+        "status": result.status,
+        "provider": result.provider,
+        "provider_duration_ms": round(result.provider_duration_ms, 2),
     }
 
 
@@ -243,6 +250,10 @@ def ask_question_semantic(request: QuestionRequest):
 
 @app.post("/ask-llm")
 def ask_question_llm(request: QuestionRequest):
+    request_id = uuid.uuid4().hex
+    request_started_at = time.perf_counter()
+    retrieval_started_at = time.perf_counter()
+    normalized_query = normalize_retrieval_query(request.question)
     relevant_chunks = find_relevant_chunks_semantic(
         question=request.question,
         chunks=DOCUMENT_CHUNKS,
@@ -250,13 +261,28 @@ def ask_question_llm(request: QuestionRequest):
         min_score=SEMANTIC_SCORE_THRESHOLD,
         min_context_chunks=LLM_MIN_CONTEXT_CHUNKS
     )
+    retrieval_duration_ms = (time.perf_counter() - retrieval_started_at) * 1000
+    response = build_llm_answer_response(request.question, relevant_chunks)
+    total_duration_ms = (time.perf_counter() - request_started_at) * 1000
 
     logger.info(
-        "LLM retrieval question=%r chunks=%d scores=%s fallback=%s",
-        request.question,
+        "ask_llm request_id=%s query=%r normalized_query=%r context_count=%d "
+        "chunk_ids=%s faq_ids=%s top_scores=%s provider=%s result=%s "
+        "retrieval_ms=%.2f provider_ms=%.2f total_ms=%.2f",
+        request_id,
+        safe_log_text(request.question),
+        safe_log_text(normalized_query),
         len(relevant_chunks),
+        [chunk["chunk_id"] for chunk in relevant_chunks],
+        [chunk.get("faq_id") for chunk in relevant_chunks if chunk.get("faq_id") is not None],
         [round(chunk["score"], 3) for chunk in relevant_chunks],
-        any(chunk["retrieval_fallback"] for chunk in relevant_chunks)
+        response["provider"],
+        response["status"],
+        retrieval_duration_ms,
+        response["provider_duration_ms"],
+        total_duration_ms,
     )
 
-    return build_llm_answer_response(request.question, relevant_chunks)
+    if response["status"] == PROVIDER_UNAVAILABLE:
+        return JSONResponse(status_code=503, content=response)
+    return response

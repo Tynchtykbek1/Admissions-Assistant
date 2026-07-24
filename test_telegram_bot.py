@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -8,11 +9,13 @@ from telegram_bot import (
     ERROR_MESSAGES,
     HELP_MESSAGES,
     NO_INFORMATION_MESSAGES,
+    PROVIDER_UNAVAILABLE_MESSAGES,
     START_MESSAGES,
     format_backend_response,
     handle_question,
     help_command,
     split_message,
+    stop_typing,
     start_command,
 )
 
@@ -44,6 +47,15 @@ class TelegramFormattingTests(unittest.TestCase):
         self.assertIn("Документы", formatted)
         self.assertIn("&lt;важно&gt;", formatted)
 
+    def test_converts_only_plain_line_asterisk_bullets(self):
+        answer = "* passport\n  * admission letter\n2 * 3 = 6\nasterisk*inside\n**Important**"
+        formatted = format_backend_response({"answer": answer, "sources": []})
+        self.assertIn("• passport\n  • admission letter", formatted)
+        self.assertIn("2 * 3 = 6", formatted)
+        self.assertIn("asterisk*inside", formatted)
+        self.assertIn("Important", formatted)
+        self.assertNotIn("**", formatted)
+
     def test_splits_long_messages_below_limit_without_losing_words(self):
         text = "\n\n".join(["Предложение с важными данными." * 10] * 8)
         parts = split_message(text, max_length=120)
@@ -55,6 +67,17 @@ class TelegramFormattingTests(unittest.TestCase):
         result = {"answer": "There is not enough information in the uploaded document.", "sources": []}
         self.assertEqual(format_backend_response(result, "ru"), NO_INFORMATION_MESSAGES["ru"])
         self.assertEqual(format_backend_response(result, "en"), NO_INFORMATION_MESSAGES["en"])
+
+    def test_localizes_provider_unavailable_exactly(self):
+        result = {"status": "provider_unavailable", "answer": "ignored", "sources": []}
+        self.assertEqual(
+            format_backend_response(result, "ru"),
+            "Сервис временно перегружен. Попробуйте повторить вопрос через несколько минут.",
+        )
+        self.assertEqual(
+            format_backend_response(result, "en"),
+            "The service is temporarily unavailable. Please try again in a few minutes.",
+        )
 
 
 class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
@@ -79,7 +102,7 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
         with patch("telegram_bot.ask_backend", new=AsyncMock(return_value=backend_result)) as backend:
             await handle_question(update, SimpleNamespace())
         backend.assert_awaited_once_with(update.message.text)
-        update.effective_chat.send_action.assert_awaited_once_with(action=ChatAction.TYPING)
+        update.effective_chat.send_action.assert_awaited_with(action=ChatAction.TYPING)
 
     async def test_russian_and_english_backend_fallbacks(self):
         backend_result = {"answer": "There is not enough information in the uploaded document.", "sources": []}
@@ -95,6 +118,74 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
             with patch("telegram_bot.ask_backend", new=AsyncMock(side_effect=ValueError("bad"))):
                 await handle_question(update, SimpleNamespace())
             self.assertEqual(update.message.reply_text.await_args.args[0], ERROR_MESSAGES[language])
+
+    async def test_typing_starts_repeats_and_stops_after_completion(self):
+        update = make_update("What documents?")
+
+        async def delayed_backend(_question):
+            await asyncio.sleep(0.035)
+            return {"status": "success", "answer": "Passport.", "sources": []}
+
+        with (
+            patch("telegram_bot.TYPING_INTERVAL_SECONDS", 0.01),
+            patch("telegram_bot.ask_backend", side_effect=delayed_backend),
+        ):
+            await handle_question(update, SimpleNamespace())
+
+        self.assertGreaterEqual(update.effective_chat.send_action.await_count, 2)
+        calls_after_completion = update.effective_chat.send_action.await_count
+        await asyncio.sleep(0.025)
+        self.assertEqual(update.effective_chat.send_action.await_count, calls_after_completion)
+
+    async def test_typing_stops_after_backend_failure(self):
+        update = make_update("What documents?")
+
+        async def failing_backend(_question):
+            await asyncio.sleep(0.025)
+            raise httpx.ConnectError("synthetic failure")
+
+        import httpx
+        with (
+            patch("telegram_bot.TYPING_INTERVAL_SECONDS", 0.01),
+            patch("telegram_bot.ask_backend", side_effect=failing_backend),
+        ):
+            await handle_question(update, SimpleNamespace())
+
+        calls_after_failure = update.effective_chat.send_action.await_count
+        self.assertGreaterEqual(calls_after_failure, 1)
+        await asyncio.sleep(0.025)
+        self.assertEqual(update.effective_chat.send_action.await_count, calls_after_failure)
+
+    async def test_stop_typing_handles_task_cancellation_cleanly(self):
+        task = asyncio.create_task(asyncio.sleep(10))
+        await stop_typing(task)
+        self.assertTrue(task.cancelled())
+
+    async def test_handler_cancellation_stops_typing_without_orphan(self):
+        update = make_update("What documents?")
+        backend_started = asyncio.Event()
+
+        async def pending_backend(_question):
+            backend_started.set()
+            await asyncio.Event().wait()
+
+        with (
+            patch("telegram_bot.TYPING_INTERVAL_SECONDS", 0.01),
+            patch("telegram_bot.ask_backend", side_effect=pending_backend),
+        ):
+            handler_task = asyncio.create_task(handle_question(update, SimpleNamespace()))
+            await backend_started.wait()
+            await asyncio.sleep(0.02)
+            handler_task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await handler_task
+
+        calls_after_cancellation = update.effective_chat.send_action.await_count
+        await asyncio.sleep(0.025)
+        self.assertEqual(
+            update.effective_chat.send_action.await_count,
+            calls_after_cancellation,
+        )
 
     async def test_start_and_help_in_both_languages(self):
         for code, language in (("ru", "ru"), ("en-US", "en")):

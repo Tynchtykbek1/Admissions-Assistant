@@ -39,6 +39,16 @@ GREETING_MESSAGES = {
     ),
 }
 
+FAREWELLS = {
+    "ru": {"пока", "до свидания", "спасибо", "спасибо пока"},
+    "en": {"bye", "goodbye", "thanks", "thank you"},
+}
+
+FAREWELL_MESSAGES = {
+    "ru": "До свидания! Обращайтесь, если появятся вопросы о поступлении.",
+    "en": "Goodbye! Feel free to return with any admissions questions.",
+}
+
 START_MESSAGES = {
     "ru": (
         "Здравствуйте! Я отвечаю на вопросы по загруженным документам о поступлении.\n\n"
@@ -142,9 +152,19 @@ def greeting_language(text: str) -> str | None:
     return None
 
 
+def farewell_language(text: str) -> str | None:
+    normalized = normalize_greeting(text)
+    if not normalized or len(normalized.split()) > 3:
+        return None
+    for language, farewells in FAREWELLS.items():
+        if normalized in farewells:
+            return language
+    return None
+
+
 def sanitize_for_html(text: str) -> str:
     """Remove common Markdown decoration, then escape all backend-controlled text."""
-    text = re.sub(r"(?m)^([ \t]*)\*(?=[ \t]+)", r"\1•", text)
+    text = re.sub(r"(?m)^([ \t]*)[-+*](?=[ \t]+)", r"\1•", text)
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.DOTALL)
     text = re.sub(r"__(.+?)__", r"\1", text, flags=re.DOTALL)
     text = re.sub(r"`{1,3}(.+?)`{1,3}", r"\1", text, flags=re.DOTALL)
@@ -152,26 +172,20 @@ def sanitize_for_html(text: str) -> str:
     return html.escape(text.strip(), quote=False)
 
 
-def is_no_information_answer(answer: str) -> bool:
-    normalized = answer.casefold()
-    markers = (
-        "not enough information", "insufficient information",
-        "does not contain enough information", "недостаточно информации",
-    )
-    return any(marker in normalized for marker in markers)
-
-
 def format_backend_response(result: dict, language: str = "en") -> str:
     if not isinstance(result, dict):
         raise ValueError("The backend returned an invalid response.")
-    if result.get("status") == "provider_unavailable":
+    status = result.get("status")
+    if status == "provider_unavailable":
         return PROVIDER_UNAVAILABLE_MESSAGES[language]
+    if status == "insufficient_document_information":
+        return NO_INFORMATION_MESSAGES[language]
+    if status not in {None, "success", "partial_information"}:
+        raise ValueError("The backend returned an invalid status.")
 
     answer = result.get("answer")
     if not isinstance(answer, str) or not answer.strip():
         raise ValueError("The backend returned an empty answer.")
-    if is_no_information_answer(answer):
-        return NO_INFORMATION_MESSAGES[language]
 
     filenames = []
     for source in result.get("sources", []):
@@ -268,6 +282,10 @@ async def handle_question(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     greeting = greeting_language(question)
     if greeting:
         await send_html(update.message, GREETING_MESSAGES[greeting])
+        return
+    farewell = farewell_language(question)
+    if farewell:
+        await send_html(update.message, FAREWELL_MESSAGES[farewell])
         return
 
     language = detect_text_language(question)

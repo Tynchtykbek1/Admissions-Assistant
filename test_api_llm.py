@@ -1,4 +1,5 @@
 import importlib
+import json
 
 import numpy as np
 from fastapi.testclient import TestClient
@@ -39,7 +40,9 @@ def test_successful_provider_answer_has_status_and_sources(tmp_path, monkeypatch
     monkeypatch.setattr("embedding_retriever.get_embedding_model", lambda: FakeModel())
     monkeypatch.setattr(
         "llm_answer_generator.generate_gemini_answer",
-        lambda _question, _context: "The deadline is 30 April.",
+        lambda _question, _context: json.dumps(
+            {"status": "success", "answer": "The deadline is 30 April."}
+        ),
     )
 
     with TestClient(app_module.app) as client:

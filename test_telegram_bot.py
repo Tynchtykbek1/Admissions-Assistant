@@ -7,6 +7,7 @@ from telegram.constants import ChatAction, ParseMode
 
 from telegram_bot import (
     ERROR_MESSAGES,
+    FAREWELL_MESSAGES,
     HELP_MESSAGES,
     NO_INFORMATION_MESSAGES,
     PROVIDER_UNAVAILABLE_MESSAGES,
@@ -48,9 +49,10 @@ class TelegramFormattingTests(unittest.TestCase):
         self.assertIn("&lt;важно&gt;", formatted)
 
     def test_converts_only_plain_line_asterisk_bullets(self):
-        answer = "* passport\n  * admission letter\n2 * 3 = 6\nasterisk*inside\n**Important**"
+        answer = "* passport\n  - admission letter\n+ income proof\n2 * 3 = 6\nasterisk*inside\n**Important**"
         formatted = format_backend_response({"answer": answer, "sources": []})
         self.assertIn("• passport\n  • admission letter", formatted)
+        self.assertIn("• income proof", formatted)
         self.assertIn("2 * 3 = 6", formatted)
         self.assertIn("asterisk*inside", formatted)
         self.assertIn("Important", formatted)
@@ -64,9 +66,28 @@ class TelegramFormattingTests(unittest.TestCase):
         self.assertEqual("".join("".join(parts).split()), "".join("".join(text.split()).split()))
 
     def test_localizes_no_information(self):
-        result = {"answer": "There is not enough information in the uploaded document.", "sources": []}
+        result = {
+            "status": "insufficient_document_information",
+            "answer": "There is not enough information in the uploaded document.",
+            "sources": [],
+        }
         self.assertEqual(format_backend_response(result, "ru"), NO_INFORMATION_MESSAGES["ru"])
         self.assertEqual(format_backend_response(result, "en"), NO_INFORMATION_MESSAGES["en"])
+
+    def test_partial_information_with_insufficient_phrase_remains_visible_with_sources(self):
+        result = {
+            "status": "partial_information",
+            "answer": (
+                "Недостаточно информации для полного списка, но указаны:\n"
+                "* гарантийное письмо\n* документы о доходах"
+            ),
+            "sources": [{"filename": "FAQ.docx.pdf"}],
+        }
+        formatted = format_backend_response(result, "ru")
+        self.assertIn("Недостаточно информации для полного списка", formatted)
+        self.assertIn("• гарантийное письмо", formatted)
+        self.assertIn("FAQ.docx.pdf", formatted)
+        self.assertNotEqual(formatted, NO_INFORMATION_MESSAGES["ru"])
 
     def test_localizes_provider_unavailable_exactly(self):
         result = {"status": "provider_unavailable", "answer": "ignored", "sources": []}
@@ -96,6 +117,38 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
     async def test_english_greeting_is_local(self):
         await self.assert_local_greeting("Hello", "en")
 
+    async def test_short_farewells_are_local(self):
+        for text, language in (
+            ("пока", "ru"),
+            ("спасибо", "ru"),
+            ("спасибо, пока", "ru"),
+            ("bye", "en"),
+            ("thank you", "en"),
+        ):
+            update = make_update(text)
+            with patch("telegram_bot.ask_backend", new=AsyncMock()) as backend:
+                await handle_question(update, SimpleNamespace())
+            backend.assert_not_awaited()
+            update.effective_chat.send_action.assert_not_awaited()
+            self.assertEqual(
+                update.message.reply_text.await_args.args[0],
+                FAREWELL_MESSAGES[language],
+            )
+
+    async def test_longer_question_containing_thanks_calls_backend(self):
+        update = make_update("Спасибо, какие документы нужны для визы?")
+        backend_result = {
+            "status": "success",
+            "answer": "Упоминается пренролмент.",
+            "sources": [],
+        }
+        with patch(
+            "telegram_bot.ask_backend",
+            new=AsyncMock(return_value=backend_result),
+        ) as backend:
+            await handle_question(update, SimpleNamespace())
+        backend.assert_awaited_once_with(update.message.text)
+
     async def test_greeting_with_question_calls_backend(self):
         update = make_update("Привет, какие документы нужны для поступления?")
         backend_result = {"answer": "Нужен паспорт.", "sources": []}
@@ -105,7 +158,11 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
         update.effective_chat.send_action.assert_awaited_with(action=ChatAction.TYPING)
 
     async def test_russian_and_english_backend_fallbacks(self):
-        backend_result = {"answer": "There is not enough information in the uploaded document.", "sources": []}
+        backend_result = {
+            "status": "insufficient_document_information",
+            "answer": "There is not enough information in the uploaded document.",
+            "sources": [],
+        }
         for question, language in (("Какие требования?", "ru"), ("What are the requirements?", "en")):
             update = make_update(question)
             with patch("telegram_bot.ask_backend", new=AsyncMock(return_value=backend_result)):

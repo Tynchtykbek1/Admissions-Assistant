@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import json
 from unittest.mock import patch
 
 import pytest
@@ -88,7 +89,9 @@ def test_successful_provider_answer_is_preserved(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "gemini")
     with patch(
         "llm_answer_generator.generate_gemini_answer",
-        return_value="The deadline is 30 April.",
+        return_value=json.dumps(
+            {"status": "success", "answer": "The deadline is 30 April."}
+        ),
     ):
         result = llm.generate_llm_answer("deadline?", CHUNKS)
     assert result.status == llm.SUCCESS
@@ -99,7 +102,10 @@ def test_provider_insufficient_answer_has_distinct_status(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "gemini")
     with patch(
         "llm_answer_generator.generate_gemini_answer",
-        return_value="There is not enough information in the uploaded document.",
+        return_value=json.dumps({
+            "status": "insufficient_document_information",
+            "answer": "There is not enough information in the uploaded document.",
+        }),
     ):
         result = llm.generate_llm_answer("visa?", CHUNKS)
     assert result.status == llm.INSUFFICIENT_DOCUMENT_INFORMATION
@@ -113,7 +119,19 @@ def test_invalid_provider_configuration_is_controlled(monkeypatch, provider):
     assert result.error_category == "invalid_configuration"
 
 
-@pytest.mark.parametrize("malformed_answer", [None, "", "   ", {"text": "answer"}])
+@pytest.mark.parametrize(
+    "malformed_answer",
+    [
+        None,
+        "",
+        "   ",
+        {"text": "answer"},
+        "The deadline is 30 April.",
+        '{"status":"made_up","answer":"Invented"}',
+        '{"status":"success","answer":"Okay","extra":"unsafe"}',
+        "```json\n{\"status\":\"success\",\"answer\":\"Okay\"}\n```",
+    ],
+)
 def test_malformed_provider_response_is_controlled(monkeypatch, malformed_answer):
     monkeypatch.setenv("LLM_PROVIDER", "gemini")
     with patch(
@@ -123,3 +141,23 @@ def test_malformed_provider_response_is_controlled(monkeypatch, malformed_answer
         result = llm.generate_llm_answer("question", CHUNKS)
     assert result.status == llm.PROVIDER_UNAVAILABLE
     assert result.error_category == "malformed_response"
+
+
+def test_useful_partial_answer_is_preserved(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    partial = (
+        "В документе нет полного перечня документов для визы, но упоминаются:\n"
+        "• пренролмент\n• гарантийное письмо\n• документы о доходах."
+    )
+    with patch(
+        "llm_answer_generator.generate_gemini_answer",
+        return_value=json.dumps(
+            {"status": "partial_information", "answer": partial},
+            ensure_ascii=False,
+        ),
+    ):
+        result = llm.generate_llm_answer("Какой перечень документов для визы?", CHUNKS)
+
+    assert result.status == llm.PARTIAL_INFORMATION
+    assert result.answer == partial
+    assert "пренролмент" in result.answer

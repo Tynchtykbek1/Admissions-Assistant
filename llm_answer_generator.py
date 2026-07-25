@@ -1,5 +1,4 @@
 import os
-import json
 import logging
 import re
 import time
@@ -14,14 +13,8 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 SUCCESS = "success"
-PARTIAL_INFORMATION = "partial_information"
 INSUFFICIENT_DOCUMENT_INFORMATION = "insufficient_document_information"
 PROVIDER_UNAVAILABLE = "provider_unavailable"
-PROVIDER_RESULT_STATUSES = {
-    SUCCESS,
-    PARTIAL_INFORMATION,
-    INSUFFICIENT_DOCUMENT_INFORMATION,
-}
 
 INSUFFICIENT_INFORMATION_ANSWER = (
     "There is not enough information in the uploaded document to answer this question."
@@ -31,36 +24,14 @@ PROVIDER_UNAVAILABLE_ANSWER = (
 )
 
 RAG_INSTRUCTIONS = (
-    "Answer the user's question only from the supplied context. Never invent or infer "
-    "unsupported admissions, visa, deadline, scholarship, university, or legal "
-    "information. Return exactly one JSON object with exactly these string fields: "
-    '{"status":"success|partial_information|insufficient_document_information",'
-    '"answer":"user-facing answer"}. '
-    "First identify the central information requested by the question. Use success "
-    "only when the context directly answers that central request. Use "
-    "partial_information only when the context contains at least one concrete fact "
-    "that directly answers the central request but the direct answer or list is "
-    "incomplete: state what is missing, then include all directly answering supported "
-    "facts. Facts merely from the same general admissions topic are not a partial "
-    "answer. If there is no direct fact, use insufficient_document_information even "
-    "when adjacent context exists. After stating that the requested information is "
-    "absent, do not append adjacent deadlines, visa rules, or other unrelated "
-    "admissions facts. Do not discard direct supported facts merely because a complete "
-    "list or guide is absent. Do not name universities when the context supplies no "
-    "university names or usable selection criteria. "
-    'Example 1 — Question: "На какие университеты могу податься?" Context: Only '
-    "application dates, visa rules, and generic admissions information. No university "
-    "names or selection criteria. Output exactly: "
-    '{"status":"insufficient_document_information","answer":"В загруженном документе '
-    "нет списка университетов или критериев, по которым можно определить, в какие "
-    'университеты вы можете податься."} '
-    'Example 2 — Question: "Какой перечень документов для визы?" Context: Several '
-    "concrete visa documents but no complete list. Output example: "
-    '{"status":"partial_information","answer":"В документе нет полного перечня '
-    'документов для визы, но упоминаются конкретные документы из контекста."} '
-    "Write the answer in the user's language, concisely for Telegram, with short "
-    "bullets when useful. Do not add a Sources section. Do not include Markdown fences "
-    "or any text outside the JSON object."
+    "Answer only using the provided context. Never invent university names, admission "
+    "requirements, deadlines, visa rules, documents, costs, scholarships, or legal "
+    "information. If the context contains only part of the requested information, "
+    "provide every relevant supported fact and clearly say what is missing. If the "
+    "requested fact is absent, say directly that the uploaded document does not "
+    "contain it. Do not fill the response with adjacent unrelated admissions "
+    "information. Keep the response concise and Telegram-friendly. Use short bullet "
+    "points where useful. Do not add a Sources section."
 )
 
 
@@ -183,24 +154,6 @@ def _safe_provider_error_details(error: Exception) -> tuple[str, int | None, str
     return category, status, request_id
 
 
-def _parse_provider_result(raw_response: str) -> tuple[str, str] | None:
-    """Parse the provider's strict internal envelope without guessing from prose."""
-    try:
-        payload = json.loads(raw_response)
-    except (TypeError, json.JSONDecodeError):
-        return None
-
-    if not isinstance(payload, dict) or set(payload) != {"status", "answer"}:
-        return None
-    status = payload.get("status")
-    answer = payload.get("answer")
-    if status not in PROVIDER_RESULT_STATUSES:
-        return None
-    if not isinstance(answer, str) or not answer.strip():
-        return None
-    return status, answer.strip()
-
-
 def _unavailable_result(
     provider: str,
     started_at: float,
@@ -262,12 +215,9 @@ def generate_llm_answer(question: str, relevant_chunks: list[dict]) -> LLMAnswer
     if not isinstance(answer, str) or not answer.strip():
         return _unavailable_result(provider, started_at, "malformed_response")
 
-    parsed_result = _parse_provider_result(answer)
-    if parsed_result is None:
-        return _unavailable_result(provider, started_at, "malformed_response")
-    status, answer = parsed_result
+    answer = answer.strip()
     return LLMAnswerResult(
-        status=status,
+        status=SUCCESS,
         answer=answer,
         provider=provider,
         provider_duration_ms=(time.perf_counter() - started_at) * 1000,

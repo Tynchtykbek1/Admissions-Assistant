@@ -1,5 +1,4 @@
 from types import SimpleNamespace
-import json
 from unittest.mock import patch
 
 import pytest
@@ -89,26 +88,26 @@ def test_successful_provider_answer_is_preserved(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "gemini")
     with patch(
         "llm_answer_generator.generate_gemini_answer",
-        return_value=json.dumps(
-            {"status": "success", "answer": "The deadline is 30 April."}
-        ),
+        return_value="The deadline is 30 April.",
     ):
         result = llm.generate_llm_answer("deadline?", CHUNKS)
     assert result.status == llm.SUCCESS
     assert result.answer == "The deadline is 30 April."
 
 
-def test_provider_insufficient_answer_has_distinct_status(monkeypatch):
+def test_normal_answer_is_never_classified_by_its_wording(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    answer = (
+        "Недостаточно информации для полного списка, но упоминаются "
+        "пренролмент и документы о доходах."
+    )
     with patch(
         "llm_answer_generator.generate_gemini_answer",
-        return_value=json.dumps({
-            "status": "insufficient_document_information",
-            "answer": "There is not enough information in the uploaded document.",
-        }),
+        return_value=answer,
     ):
         result = llm.generate_llm_answer("visa?", CHUNKS)
-    assert result.status == llm.INSUFFICIENT_DOCUMENT_INFORMATION
+    assert result.status == llm.SUCCESS
+    assert result.answer == answer
 
 
 @pytest.mark.parametrize("provider", ["", "unsupported"])
@@ -126,10 +125,6 @@ def test_invalid_provider_configuration_is_controlled(monkeypatch, provider):
         "",
         "   ",
         {"text": "answer"},
-        "The deadline is 30 April.",
-        '{"status":"made_up","answer":"Invented"}',
-        '{"status":"success","answer":"Okay","extra":"unsafe"}',
-        "```json\n{\"status\":\"success\",\"answer\":\"Okay\"}\n```",
     ],
 )
 def test_malformed_provider_response_is_controlled(monkeypatch, malformed_answer):
@@ -143,21 +138,71 @@ def test_malformed_provider_response_is_controlled(monkeypatch, malformed_answer
     assert result.error_category == "malformed_response"
 
 
-def test_useful_partial_answer_is_preserved(monkeypatch):
+def test_visa_partial_facts_are_preserved_as_success(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "gemini")
-    partial = (
+    answer = (
         "В документе нет полного перечня документов для визы, но упоминаются:\n"
         "• пренролмент\n• гарантийное письмо\n• документы о доходах."
     )
     with patch(
         "llm_answer_generator.generate_gemini_answer",
-        return_value=json.dumps(
-            {"status": "partial_information", "answer": partial},
-            ensure_ascii=False,
-        ),
+        return_value=answer,
     ):
         result = llm.generate_llm_answer("Какой перечень документов для визы?", CHUNKS)
 
-    assert result.status == llm.PARTIAL_INFORMATION
-    assert result.answer == partial
+    assert result.status == llm.SUCCESS
+    assert result.answer == answer
     assert "пренролмент" in result.answer
+
+
+@pytest.mark.parametrize(
+    ("question", "answer", "required_text"),
+    [
+        (
+            "Мне нужна информация по поступлению",
+            "Из документа:\n• подача — с декабря по май\n• нужны переводы и апостиль.",
+            "апостиль",
+        ),
+        (
+            "На какие университеты могу податься?",
+            "Загруженный документ не содержит списка университетов или критериев выбора.",
+            "не содержит",
+        ),
+        (
+            "Какие дедлайны есть?",
+            "Подача проходит с середины декабря до середины мая.",
+            "середины мая",
+        ),
+    ],
+)
+def test_document_based_plain_text_behaviours(
+    monkeypatch, question, answer, required_text
+):
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    with patch(
+        "llm_answer_generator.generate_gemini_answer",
+        return_value=answer,
+    ):
+        result = llm.generate_llm_answer(question, CHUNKS)
+    assert result.status == llm.SUCCESS
+    assert result.answer == answer
+    assert required_text in result.answer
+
+
+def test_university_absence_answer_has_no_invented_or_adjacent_facts(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    answer = "Загруженный документ не содержит списка университетов или критериев выбора."
+    with patch(
+        "llm_answer_generator.generate_gemini_answer",
+        return_value=answer,
+    ):
+        result = llm.generate_llm_answer(
+            "На какие университеты могу податься?", CHUNKS
+        )
+    assert result.status == llm.SUCCESS
+    assert "дедлайн" not in result.answer.casefold()
+    assert "виз" not in result.answer.casefold()
+    assert not any(
+        name in result.answer.casefold()
+        for name in ("болон", "сапиенц", "паду", "милан")
+    )

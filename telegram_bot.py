@@ -180,7 +180,7 @@ def format_backend_response(result: dict, language: str = "en") -> str:
         return PROVIDER_UNAVAILABLE_MESSAGES[language]
     if status == "insufficient_document_information":
         return NO_INFORMATION_MESSAGES[language]
-    if status not in {None, "success", "partial_information"}:
+    if status not in {None, "success"}:
         raise ValueError("The backend returned an invalid status.")
 
     answer = result.get("answer")

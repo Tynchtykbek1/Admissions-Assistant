@@ -74,9 +74,9 @@ class TelegramFormattingTests(unittest.TestCase):
         self.assertEqual(format_backend_response(result, "ru"), NO_INFORMATION_MESSAGES["ru"])
         self.assertEqual(format_backend_response(result, "en"), NO_INFORMATION_MESSAGES["en"])
 
-    def test_partial_information_with_insufficient_phrase_remains_visible_with_sources(self):
+    def test_success_with_insufficient_phrase_remains_visible_with_sources(self):
         result = {
-            "status": "partial_information",
+            "status": "success",
             "answer": (
                 "Недостаточно информации для полного списка, но указаны:\n"
                 "* гарантийное письмо\n* документы о доходах"

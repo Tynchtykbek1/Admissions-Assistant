@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 
 
@@ -30,9 +31,11 @@ def safe_log_text(value: str, max_length: int = 160) -> str:
 
 def configure_logging() -> None:
     """Keep application diagnostics while silencing credential-bearing HTTP logs."""
+    configured_level = os.getenv("LOG_LEVEL", "INFO").strip().upper()
+    level = getattr(logging, configured_level, logging.INFO)
     logging.basicConfig(
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        level=logging.INFO,
+        level=level,
     )
 
     for logger_name in _SENSITIVE_THIRD_PARTY_LOGGERS:

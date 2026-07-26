@@ -119,26 +119,37 @@ def find_relevant_chunks_semantic(
     chunks: list[dict],
     top_k: int = 3,
     min_score: float = 0.30,
-    min_context_chunks: int = 0
+    min_context_chunks: int = 0,
+    fallback_score_threshold: float | None = None,
 ) -> list[dict]:
     if not chunks:
         return []
 
     ranked_candidates = build_retrieval_diagnostics(question, chunks)
-    eligible_candidates = [
-        candidate
-        for candidate in ranked_candidates
-        if candidate["score"] >= min_score or candidate["faq_match_type"] == "exact"
-    ]
-    top_candidates = eligible_candidates[:top_k]
+    eligible_candidates = []
+    for candidate in ranked_candidates:
+        is_primary = (
+            candidate["score"] >= min_score
+            or candidate["faq_match_type"] == "exact"
+        )
+        is_fallback = (
+            not is_primary
+            and fallback_score_threshold is not None
+            and candidate["score"] >= fallback_score_threshold
+        )
+        if is_primary or is_fallback:
+            eligible_candidates.append((candidate, is_fallback))
 
     relevant_chunks = []
+    seen_chunk_ids = set()
 
-    for candidate in top_candidates:
+    for candidate, is_fallback in eligible_candidates:
         index = candidate["index"]
         score = candidate["score"]
 
         chunk = chunks[index]
+        if chunk["chunk_id"] in seen_chunk_ids:
+            continue
 
         result = {
             "chunk_id": chunk["chunk_id"],
@@ -148,44 +159,15 @@ def find_relevant_chunks_semantic(
             "faq_match_type": candidate["faq_match_type"],
             "faq_match_boost": candidate["faq_match_boost"],
             "final_score": candidate["final_score"],
-            "retrieval_fallback": False
+            "retrieval_fallback": is_fallback,
         }
 
         if "faq_id" in chunk:
             result["faq_id"] = chunk["faq_id"]
 
         relevant_chunks.append(result)
-
-    fallback_limit = min(min_context_chunks, top_k, len(chunks))
-
-    if len(relevant_chunks) < fallback_limit:
-        existing_ids = {chunk["chunk_id"] for chunk in relevant_chunks}
-
-        for candidate in ranked_candidates:
-            index = candidate["index"]
-            chunk = chunks[index]
-
-            if chunk["chunk_id"] in existing_ids:
-                continue
-
-            result = {
-                "chunk_id": chunk["chunk_id"],
-                "filename": chunk["filename"],
-                "text": chunk["text"],
-                "score": candidate["score"],
-                "faq_match_type": candidate["faq_match_type"],
-                "faq_match_boost": candidate["faq_match_boost"],
-                "final_score": candidate["final_score"],
-                "retrieval_fallback": True
-            }
-
-            if "faq_id" in chunk:
-                result["faq_id"] = chunk["faq_id"]
-
-            relevant_chunks.append(result)
-            existing_ids.add(chunk["chunk_id"])
-
-            if len(relevant_chunks) == fallback_limit:
-                break
+        seen_chunk_ids.add(chunk["chunk_id"])
+        if len(relevant_chunks) == top_k:
+            break
 
     return relevant_chunks

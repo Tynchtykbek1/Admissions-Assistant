@@ -180,7 +180,7 @@ class MultilingualRetrievalTests(unittest.TestCase):
         self.assertEqual(results[0]["faq_id"], 41)
         self.assertEqual(results[0]["faq_match_type"], "exact")
 
-    def test_unrelated_fallback_is_limited(self):
+    def test_unrelated_chunks_are_not_forced_to_minimum_context(self):
         results = find_relevant_chunks_semantic(
             "Как отремонтировать велосипед?",
             self.chunks,
@@ -189,7 +189,18 @@ class MultilingualRetrievalTests(unittest.TestCase):
             min_context_chunks=2
         )
 
-        self.assertEqual(len(results), 2)
+        self.assertEqual(results, [])
+
+    def test_conservative_fallback_requires_its_own_threshold(self):
+        results = find_relevant_chunks_semantic(
+            "Где поставить апостиль?",
+            self.chunks,
+            top_k=3,
+            min_score=0.99,
+            min_context_chunks=3,
+            fallback_score_threshold=0.70,
+        )
+        self.assertTrue(results)
         self.assertTrue(all(result["retrieval_fallback"] for result in results))
 
 

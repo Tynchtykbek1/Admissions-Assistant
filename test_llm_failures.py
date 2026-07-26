@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import json
 from unittest.mock import patch
 
 import pytest
@@ -16,6 +17,10 @@ CHUNKS = [
         "score": 0.8,
     }
 ]
+
+
+def provider_answer(status: str, answer: str) -> str:
+    return json.dumps({"status": status, "answer": answer}, ensure_ascii=False)
 
 
 @pytest.fixture(autouse=True)
@@ -88,14 +93,14 @@ def test_successful_provider_answer_is_preserved(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "gemini")
     with patch(
         "llm_answer_generator.generate_gemini_answer",
-        return_value="The deadline is 30 April.",
+        return_value=provider_answer("success", "The deadline is 30 April."),
     ):
         result = llm.generate_llm_answer("deadline?", CHUNKS)
     assert result.status == llm.SUCCESS
     assert result.answer == "The deadline is 30 April."
 
 
-def test_normal_answer_is_never_classified_by_its_wording(monkeypatch):
+def test_status_is_not_inferred_from_answer_wording(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "gemini")
     answer = (
         "Недостаточно информации для полного списка, но упоминаются "
@@ -103,10 +108,10 @@ def test_normal_answer_is_never_classified_by_its_wording(monkeypatch):
     )
     with patch(
         "llm_answer_generator.generate_gemini_answer",
-        return_value=answer,
+        return_value=provider_answer("partial_information", answer),
     ):
         result = llm.generate_llm_answer("visa?", CHUNKS)
-    assert result.status == llm.SUCCESS
+    assert result.status == llm.PARTIAL_INFORMATION
     assert result.answer == answer
 
 
@@ -125,6 +130,8 @@ def test_invalid_provider_configuration_is_controlled(monkeypatch, provider):
         "",
         "   ",
         {"text": "answer"},
+        "plain text is not a structured result",
+        '{"status":"unknown","answer":"text"}',
     ],
 )
 def test_malformed_provider_response_is_controlled(monkeypatch, malformed_answer):
@@ -138,7 +145,7 @@ def test_malformed_provider_response_is_controlled(monkeypatch, malformed_answer
     assert result.error_category == "malformed_response"
 
 
-def test_visa_partial_facts_are_preserved_as_success(monkeypatch):
+def test_visa_partial_facts_preserve_structured_partial_status(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "gemini")
     answer = (
         "В документе нет полного перечня документов для визы, но упоминаются:\n"
@@ -146,11 +153,11 @@ def test_visa_partial_facts_are_preserved_as_success(monkeypatch):
     )
     with patch(
         "llm_answer_generator.generate_gemini_answer",
-        return_value=answer,
+        return_value=provider_answer("partial_information", answer),
     ):
         result = llm.generate_llm_answer("Какой перечень документов для визы?", CHUNKS)
 
-    assert result.status == llm.SUCCESS
+    assert result.status == llm.PARTIAL_INFORMATION
     assert result.answer == answer
     assert "пренролмент" in result.answer
 
@@ -181,7 +188,7 @@ def test_document_based_plain_text_behaviours(
     monkeypatch.setenv("LLM_PROVIDER", "gemini")
     with patch(
         "llm_answer_generator.generate_gemini_answer",
-        return_value=answer,
+        return_value=provider_answer("success", answer),
     ):
         result = llm.generate_llm_answer(question, CHUNKS)
     assert result.status == llm.SUCCESS
@@ -194,15 +201,27 @@ def test_university_absence_answer_has_no_invented_or_adjacent_facts(monkeypatch
     answer = "Загруженный документ не содержит списка университетов или критериев выбора."
     with patch(
         "llm_answer_generator.generate_gemini_answer",
-        return_value=answer,
+        return_value=provider_answer("insufficient_document_information", answer),
     ):
         result = llm.generate_llm_answer(
             "На какие университеты могу податься?", CHUNKS
         )
-    assert result.status == llm.SUCCESS
+    assert result.status == llm.INSUFFICIENT_DOCUMENT_INFORMATION
     assert "дедлайн" not in result.answer.casefold()
     assert "виз" not in result.answer.casefold()
     assert not any(
         name in result.answer.casefold()
         for name in ("болон", "сапиенц", "паду", "милан")
     )
+
+
+def test_markdown_fenced_json_is_accepted(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    response = "```json\n" + provider_answer("success", "Supported answer.") + "\n```"
+    with patch(
+        "llm_answer_generator.generate_gemini_answer",
+        return_value=response,
+    ):
+        result = llm.generate_llm_answer("question", CHUNKS)
+    assert result.status == llm.SUCCESS
+    assert result.answer == "Supported answer."

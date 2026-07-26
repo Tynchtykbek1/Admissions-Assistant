@@ -14,6 +14,8 @@ const answerElement = document.querySelector("#answer");
 const sourcesElement = document.querySelector("#sources");
 
 let documentUploaded = false;
+let conversationId = localStorage.getItem("admissionsConversationId");
+let activeDocumentId = null;
 
 function showError(element, message) {
     element.textContent = message;
@@ -47,6 +49,9 @@ uploadButton.addEventListener("click", async () => {
 
     const formData = new FormData();
     formData.append("file", file);
+    if (conversationId) {
+        formData.append("conversation_id", conversationId);
+    }
 
     try {
         const response = await fetch("/upload", {
@@ -60,6 +65,9 @@ uploadButton.addEventListener("click", async () => {
 
         const result = await response.json();
         documentUploaded = true;
+        conversationId = result.conversation_id;
+        activeDocumentId = result.document_id;
+        localStorage.setItem("admissionsConversationId", conversationId);
         const typeLabel = result.document_type === "faq" ? "FAQ" : "Standard";
         const itemCount = result.entries_count ?? result.chunks_count;
         uploadStatus.textContent = `Uploaded ${result.filename}. Text length: ${result.text_length}. Chunks / entries: ${itemCount}.`;
@@ -87,7 +95,7 @@ askButton.addEventListener("click", async () => {
         return;
     }
 
-    const endpoint = answerMode.value === "llm" ? "/ask-llm" : "/ask-semantic";
+    const endpoint = answerMode.value === "llm" ? "/chat" : "/ask-semantic";
     clearError(askStatus);
     askStatus.textContent = "Finding an answer...";
     askButton.disabled = true;
@@ -96,7 +104,11 @@ askButton.addEventListener("click", async () => {
         const response = await fetch(endpoint, {
             method: "POST",
             headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({question})
+            body: JSON.stringify({
+                question,
+                conversation_id: conversationId,
+                document_id: activeDocumentId
+            })
         });
 
         if (!response.ok) {
@@ -104,6 +116,10 @@ askButton.addEventListener("click", async () => {
         }
 
         const result = await response.json();
+        if (result.conversation_id) {
+            conversationId = result.conversation_id;
+            localStorage.setItem("admissionsConversationId", conversationId);
+        }
         answerElement.textContent = result.answer;
         sourcesElement.replaceChildren();
 

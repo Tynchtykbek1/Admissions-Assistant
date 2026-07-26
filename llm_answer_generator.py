@@ -1,18 +1,22 @@
-import os
+import json
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass
+from typing import Literal
 
 from dotenv import load_dotenv
 from google import genai
 from openai import OpenAI
+from pydantic import BaseModel, ValidationError, field_validator
 
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
 SUCCESS = "success"
+PARTIAL_INFORMATION = "partial_information"
 INSUFFICIENT_DOCUMENT_INFORMATION = "insufficient_document_information"
 PROVIDER_UNAVAILABLE = "provider_unavailable"
 
@@ -23,16 +27,44 @@ PROVIDER_UNAVAILABLE_ANSWER = (
     "The service is temporarily unavailable. Please try again in a few minutes."
 )
 
-RAG_INSTRUCTIONS = (
-    "Answer only using the provided context. Never invent university names, admission "
-    "requirements, deadlines, visa rules, documents, costs, scholarships, or legal "
-    "information. If the context contains only part of the requested information, "
-    "provide every relevant supported fact and clearly say what is missing. If the "
-    "requested fact is absent, say directly that the uploaded document does not "
-    "contain it. Do not fill the response with adjacent unrelated admissions "
-    "information. Keep the response concise and Telegram-friendly. Use short bullet "
-    "points where useful. Do not add a Sources section."
-)
+RAG_INSTRUCTIONS = """
+Answer only from the retrieved document context.
+Conversation history is only for resolving what the user means; previous assistant
+answers are not authoritative factual sources. Never invent university names,
+admission requirements, deadlines, visa rules, documents, costs, scholarships,
+contacts, procedures, or legal information.
+
+Return exactly one JSON object:
+{"status":"success|partial_information|insufficient_document_information",
+ "answer":"concise user-facing answer"}
+
+Use success only when the requested central fact is directly supported by the
+retrieved context. Use partial_information only when the context directly supports
+part, but not all, of the requested answer; provide every supported relevant fact and
+clearly state what is missing. Use insufficient_document_information when no
+retrieved fact directly answers the central request. Facts from the same general
+admissions topic are not enough. Do not append adjacent unrelated information.
+Answer in the language of the current user question. Keep the response concise and
+Telegram-friendly, with short bullets where useful. Do not add a Sources section.
+Do not include Markdown fences or text outside the JSON object.
+""".strip()
+
+
+class ProviderAnswer(BaseModel):
+    status: Literal[
+        "success",
+        "partial_information",
+        "insufficient_document_information",
+    ]
+    answer: str
+
+    @field_validator("answer")
+    @classmethod
+    def answer_must_not_be_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("answer must not be blank")
+        return stripped
 
 
 @dataclass(frozen=True)
@@ -52,9 +84,81 @@ def _safe_provider_name(provider: str) -> str:
     return "unconfigured" if not provider else "invalid"
 
 
+def _provider_configuration(
+    provider: str,
+    model_override: str | None = None,
+) -> tuple[str, str] | None:
+    if provider == "openai":
+        api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        model = model_override or os.getenv("OPENAI_MODEL", "").strip()
+    elif provider == "gemini":
+        api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        model = model_override or os.getenv("GEMINI_MODEL", "").strip()
+    else:
+        return None
+    return (api_key, model) if api_key and model else None
+
+
+def generate_openai_text(
+    instructions: str,
+    input_text: str,
+    *,
+    model_override: str | None = None,
+) -> str | None:
+    configuration = _provider_configuration("openai", model_override)
+    if configuration is None:
+        return None
+    api_key, model = configuration
+    client = OpenAI(api_key=api_key)
+    response = client.responses.create(
+        model=model,
+        instructions=instructions,
+        input=input_text,
+    )
+    return response.output_text
+
+
+def generate_gemini_text(
+    instructions: str,
+    input_text: str,
+    *,
+    model_override: str | None = None,
+) -> str | None:
+    configuration = _provider_configuration("gemini", model_override)
+    if configuration is None:
+        return None
+    api_key, model = configuration
+    client = genai.Client(api_key=api_key)
+    try:
+        response = client.models.generate_content(
+            model=model,
+            contents=f"{instructions}\n\n{input_text}",
+        )
+        return response.text
+    finally:
+        client.close()
+
+
+def generate_provider_text(
+    provider: str,
+    instructions: str,
+    input_text: str,
+    *,
+    model_override: str | None = None,
+) -> str | None:
+    if provider == "openai":
+        return generate_openai_text(
+            instructions, input_text, model_override=model_override
+        )
+    if provider == "gemini":
+        return generate_gemini_text(
+            instructions, input_text, model_override=model_override
+        )
+    return None
+
+
 def build_context(relevant_chunks: list[dict]) -> str:
     context_parts = []
-
     for source_number, chunk in enumerate(relevant_chunks, start=1):
         identifier = (
             f"FAQ ID: {chunk['faq_id']}"
@@ -67,50 +171,81 @@ def build_context(relevant_chunks: list[dict]) -> str:
             f"{identifier}\n"
             f"Content:\n{chunk['text']}"
         )
-
     return "\n\n".join(context_parts)
 
 
-def generate_openai_answer(question: str, context: str) -> str | None:
-    api_key = os.getenv("OPENAI_API_KEY")
-    model_name = os.getenv("OPENAI_MODEL")
-
-    if not api_key or not model_name:
-        return None
-
-    client = OpenAI(api_key=api_key)
-    response = client.responses.create(
-        model=model_name,
-        instructions=RAG_INSTRUCTIONS,
-        input=f"Question:\n{question}\n\nContext:\n{context}"
+def _format_history(history: list[dict] | None) -> str:
+    if not history:
+        return "(none)"
+    return "\n".join(
+        f"{message['role'].title()}: {message['content']}" for message in history
     )
 
-    return response.output_text
+
+def generate_openai_answer(
+    question: str,
+    context: str,
+    *,
+    standalone_question: str | None = None,
+    history: list[dict] | None = None,
+) -> str | None:
+    return generate_openai_text(
+        RAG_INSTRUCTIONS,
+        _build_answer_input(question, standalone_question, history, context),
+    )
 
 
-def generate_gemini_answer(question: str, context: str) -> str | None:
-    api_key = os.getenv("GEMINI_API_KEY")
-    model_name = os.getenv("GEMINI_MODEL")
+def generate_gemini_answer(
+    question: str,
+    context: str,
+    *,
+    standalone_question: str | None = None,
+    history: list[dict] | None = None,
+) -> str | None:
+    return generate_gemini_text(
+        RAG_INSTRUCTIONS,
+        _build_answer_input(question, standalone_question, history, context),
+    )
 
-    if not api_key or not model_name:
+
+def _build_answer_input(
+    question: str,
+    standalone_question: str | None,
+    history: list[dict] | None,
+    context: str,
+) -> str:
+    return (
+        f"Recent conversation history (reference resolution only):\n"
+        f"{_format_history(history)}\n\n"
+        f"Current user question:\n{question}\n\n"
+        f"Standalone retrieval question:\n{standalone_question or question}\n\n"
+        f"Retrieved document context:\n{context}"
+    )
+
+
+def parse_provider_answer(raw_response: str) -> ProviderAnswer | None:
+    if not isinstance(raw_response, str) or not raw_response.strip():
+        return None
+    cleaned = raw_response.strip()
+    fenced = re.fullmatch(
+        r"```(?:json)?\s*(\{.*\})\s*```",
+        cleaned,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    if fenced:
+        cleaned = fenced.group(1).strip()
+    try:
+        payload = json.loads(cleaned)
+        if not isinstance(payload, dict) or set(payload) != {"status", "answer"}:
+            return None
+        return ProviderAnswer(**payload)
+    except (json.JSONDecodeError, ValidationError, TypeError):
         return None
 
-    client = genai.Client(api_key=api_key)
 
-    try:
-        response = client.models.generate_content(
-            model=model_name,
-            contents=(
-                f"{RAG_INSTRUCTIONS}\n\n"
-                f"Question:\n{question}\n\nContext:\n{context}"
-            )
-        )
-        return response.text
-    finally:
-        client.close()
-
-
-def _safe_provider_error_details(error: Exception) -> tuple[str, int | None, str | None]:
+def _safe_provider_error_details(
+    error: Exception,
+) -> tuple[str, int | None, str | None]:
     status = getattr(error, "status_code", None)
     if not isinstance(status, int):
         error_code = getattr(error, "code", None)
@@ -140,7 +275,8 @@ def _safe_provider_error_details(error: Exception) -> tuple[str, int | None, str
     if status == 429 or "resource_exhausted" in provider_status_name:
         category = "rate_limited"
     elif status in (401, 403) or any(
-        marker in error_name for marker in ("authentication", "permission", "unauthorized")
+        marker in error_name
+        for marker in ("authentication", "permission", "unauthorized")
     ):
         category = "authentication"
     elif isinstance(error, TimeoutError) or "timeout" in error_name:
@@ -179,7 +315,13 @@ def _unavailable_result(
     )
 
 
-def generate_llm_answer(question: str, relevant_chunks: list[dict]) -> LLMAnswerResult:
+def generate_llm_answer(
+    question: str,
+    relevant_chunks: list[dict],
+    *,
+    standalone_question: str | None = None,
+    history: list[dict] | None = None,
+) -> LLMAnswerResult:
     provider = os.getenv("LLM_PROVIDER", "").strip().lower()
     started_at = time.perf_counter()
 
@@ -190,35 +332,29 @@ def generate_llm_answer(question: str, relevant_chunks: list[dict]) -> LLMAnswer
             provider=_safe_provider_name(provider),
             provider_duration_ms=0.0,
         )
-
-    if provider not in {"openai", "gemini"}:
-        return _unavailable_result(provider, started_at, "invalid_configuration")
-    required_configuration = (
-        ("OPENAI_API_KEY", "OPENAI_MODEL")
-        if provider == "openai"
-        else ("GEMINI_API_KEY", "GEMINI_MODEL")
-    )
-    if any(not os.getenv(name) for name in required_configuration):
+    if provider not in {"openai", "gemini"} or _provider_configuration(provider) is None:
         return _unavailable_result(provider, started_at, "invalid_configuration")
 
     context = build_context(relevant_chunks)
-
     try:
+        kwargs = {
+            "standalone_question": standalone_question,
+            "history": history,
+        }
         if provider == "openai":
-            answer = generate_openai_answer(question, context)
+            raw_answer = generate_openai_answer(question, context, **kwargs)
         else:
-            answer = generate_gemini_answer(question, context)
+            raw_answer = generate_gemini_answer(question, context, **kwargs)
     except Exception as error:
         category, status, request_id = _safe_provider_error_details(error)
         return _unavailable_result(provider, started_at, category, status, request_id)
 
-    if not isinstance(answer, str) or not answer.strip():
+    parsed = parse_provider_answer(raw_answer) if isinstance(raw_answer, str) else None
+    if parsed is None:
         return _unavailable_result(provider, started_at, "malformed_response")
-
-    answer = answer.strip()
     return LLMAnswerResult(
-        status=SUCCESS,
-        answer=answer,
+        status=parsed.status,
+        answer=parsed.answer,
         provider=provider,
         provider_duration_ms=(time.perf_counter() - started_at) * 1000,
     )

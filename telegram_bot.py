@@ -3,6 +3,7 @@ import html
 import logging
 import os
 import re
+from weakref import WeakValueDictionary
 
 import httpx
 from dotenv import load_dotenv
@@ -76,6 +77,8 @@ HELP_MESSAGES = {
         "• Какие документы нужны для поступления?\n"
         "• Каковы сроки подачи заявления?\n"
         "• Нужно ли апостилировать документы?\n\n"
+        "Можно задавать уточняющие вопросы: бот учитывает недавний контекст диалога.\n"
+        "Используйте /reset, чтобы очистить историю текущего диалога.\n\n"
         "Ответы основаны на загруженных документах о поступлении. Если информации "
         "недостаточно, пожалуйста, обратитесь к менеджеру."
     ),
@@ -86,6 +89,8 @@ HELP_MESSAGES = {
         "• What documents are required for admission?\n"
         "• What are the application deadlines?\n"
         "• Do my documents need an apostille?\n\n"
+        "Follow-up questions are supported using recent conversation context.\n"
+        "Use /reset to clear the current conversation history.\n\n"
         "Answers are based on the uploaded admissions documents. If there is not "
         "enough information, please contact a human manager."
     ),
@@ -112,17 +117,94 @@ PROVIDER_UNAVAILABLE_MESSAGES = {
     "en": "The service is temporarily unavailable. Please try again in a few minutes.",
 }
 
+RESET_MESSAGES = {
+    "ru": "История диалога очищена. Активный документ сохранён.",
+    "en": "Conversation history cleared. The active document was kept.",
+}
+
+STATUS_NO_DOCUMENT_MESSAGES = {
+    "ru": "Backend доступен. Для этого диалога активный документ не выбран.",
+    "en": "The backend is reachable. No active document is selected for this conversation.",
+}
+
 configure_logging()
 logger = logging.getLogger(__name__)
+_chat_locks: WeakValueDictionary[int, asyncio.Lock] = WeakValueDictionary()
 
 
-async def ask_backend(question: str) -> dict:
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(f"{BACKEND_URL}/ask-llm", json={"question": question})
+def _telegram_identifiers(update: Update) -> tuple[str, str | None]:
+    if not update.effective_chat:
+        raise ValueError("Telegram chat is unavailable.")
+    chat_id = str(update.effective_chat.id)
+    user_id = str(update.effective_user.id) if update.effective_user else None
+    return chat_id, user_id
+
+
+def _chat_lock(update: Update) -> asyncio.Lock:
+    if not update.effective_chat:
+        return asyncio.Lock()
+    chat_id = int(update.effective_chat.id)
+    lock = _chat_locks.get(chat_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _chat_locks[chat_id] = lock
+    return lock
+
+
+async def ask_backend(
+    question: str,
+    external_chat_id: str,
+    external_user_id: str | None,
+    conversation_id: str | None = None,
+) -> dict:
+    payload = {
+        "question": question,
+        "external_chat_id": external_chat_id,
+        "external_user_id": external_user_id,
+    }
+    if conversation_id:
+        payload["conversation_id"] = conversation_id
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        response = await client.post(f"{BACKEND_URL}/chat", json=payload)
         if response.status_code == 503:
             result = response.json()
             if isinstance(result, dict) and result.get("status") == "provider_unavailable":
                 return result
+        response.raise_for_status()
+        return response.json()
+
+
+async def reset_backend(
+    external_chat_id: str,
+    external_user_id: str | None,
+    conversation_id: str | None = None,
+) -> dict:
+    payload = {
+        "external_chat_id": external_chat_id,
+        "external_user_id": external_user_id,
+        "conversation_id": conversation_id,
+    }
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.post(f"{BACKEND_URL}/conversation/reset", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+
+async def backend_status(
+    external_chat_id: str,
+    external_user_id: str | None,
+    conversation_id: str | None = None,
+) -> dict:
+    params = {
+        "external_chat_id": external_chat_id,
+        "external_user_id": external_user_id,
+    }
+    if conversation_id:
+        params["conversation_id"] = conversation_id
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(
+            f"{BACKEND_URL}/conversation/status", params=params
+        )
         response.raise_for_status()
         return response.json()
 
@@ -180,29 +262,44 @@ def format_backend_response(result: dict, language: str = "en") -> str:
         return PROVIDER_UNAVAILABLE_MESSAGES[language]
     if status == "insufficient_document_information":
         return NO_INFORMATION_MESSAGES[language]
-    if status not in {None, "success"}:
+    if status not in {None, "success", "partial_information"}:
         raise ValueError("The backend returned an invalid status.")
 
     answer = result.get("answer")
     if not isinstance(answer, str) or not answer.strip():
         raise ValueError("The backend returned an empty answer.")
 
-    filenames = []
+    source_labels = []
+    seen_sources = set()
     for source in result.get("sources", []):
         if not isinstance(source, dict):
             continue
         filename = source.get("filename")
-        if filename and filename not in filenames:
-            filenames.append(str(filename))
-        if len(filenames) == 3:
+        if not filename:
+            continue
+        faq_id = source.get("faq_id")
+        identity = (str(filename), faq_id, source.get("chunk_id"))
+        if identity in seen_sources:
+            continue
+        seen_sources.add(identity)
+        label = str(filename)
+        if faq_id is not None:
+            label += f" — FAQ {faq_id}"
+        source_labels.append(label)
+        if len(source_labels) == 5:
             break
 
     safe_answer = sanitize_for_html(answer)
-    if not filenames:
+    if not source_labels:
         return safe_answer
 
-    heading = "Источники" if language == "ru" else "Sources"
-    sources_text = "\n".join(f"• {html.escape(name, quote=False)}" for name in filenames)
+    if language == "ru":
+        heading = "Источник" if len(source_labels) == 1 else "Источники"
+    else:
+        heading = "Source" if len(source_labels) == 1 else "Sources"
+    sources_text = "\n".join(
+        f"• {html.escape(label, quote=False)}" for label in source_labels
+    )
     return f"{safe_answer}\n\n{heading}:\n{sources_text}"
 
 
@@ -251,6 +348,63 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await send_html(update.message, HELP_MESSAGES[user_command_language(update)])
 
 
+def _stored_conversation_id(context: ContextTypes.DEFAULT_TYPE) -> str | None:
+    chat_data = getattr(context, "chat_data", None)
+    return chat_data.get("conversation_id") if isinstance(chat_data, dict) else None
+
+
+def _remember_conversation_id(
+    context: ContextTypes.DEFAULT_TYPE, result: dict
+) -> None:
+    conversation_id = result.get("conversation_id")
+    chat_data = getattr(context, "chat_data", None)
+    if isinstance(chat_data, dict) and isinstance(conversation_id, str):
+        chat_data["conversation_id"] = conversation_id
+
+
+async def reset_command(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    if not update.message:
+        return
+    language = user_command_language(update)
+    try:
+        chat_id, user_id = _telegram_identifiers(update)
+        async with _chat_lock(update):
+            result = await reset_backend(
+                chat_id, user_id, _stored_conversation_id(context)
+            )
+        _remember_conversation_id(context, result)
+        await send_html(update.message, RESET_MESSAGES[language])
+    except (httpx.HTTPError, ValueError, TypeError):
+        await send_html(update.message, ERROR_MESSAGES[language])
+
+
+async def status_command(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    if not update.message:
+        return
+    language = user_command_language(update)
+    try:
+        chat_id, user_id = _telegram_identifiers(update)
+        result = await backend_status(
+            chat_id, user_id, _stored_conversation_id(context)
+        )
+        _remember_conversation_id(context, result)
+        filename = result.get("active_document_filename")
+        if filename:
+            prefix = "Backend доступен. Активный документ" if language == "ru" else (
+                "The backend is reachable. Active document"
+            )
+            text = f"{prefix}: {html.escape(str(filename), quote=False)}"
+        else:
+            text = STATUS_NO_DOCUMENT_MESSAGES[language]
+        await send_html(update.message, text)
+    except (httpx.HTTPError, ValueError, TypeError):
+        await send_html(update.message, ERROR_MESSAGES[language])
+
+
 async def keep_typing(chat) -> None:
     try:
         while True:
@@ -289,29 +443,35 @@ async def handle_question(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     language = detect_text_language(question)
-    typing_task = (
-        asyncio.create_task(keep_typing(update.effective_chat))
-        if update.effective_chat
-        else None
-    )
-
-    try:
-        try:
-            if typing_task is not None:
-                # Give the background task one event-loop turn for the first action.
-                await asyncio.sleep(0)
-            result = await ask_backend(question)
-        finally:
-            await stop_typing(typing_task)
-        final_text = format_backend_response(result, language)
-        for part in split_message(final_text):
-            await send_html(update.message, part)
-    except (httpx.HTTPError, ValueError, TypeError) as error:
-        logger.warning(
-            "Could not get an answer from the FastAPI backend category=%s.",
-            type(error).__name__,
+    async with _chat_lock(update):
+        typing_task = (
+            asyncio.create_task(keep_typing(update.effective_chat))
+            if update.effective_chat
+            else None
         )
-        await send_html(update.message, ERROR_MESSAGES[language])
+        try:
+            try:
+                if typing_task is not None:
+                    await asyncio.sleep(0)
+                chat_id, user_id = _telegram_identifiers(update)
+                result = await ask_backend(
+                    question,
+                    chat_id,
+                    user_id,
+                    _stored_conversation_id(context),
+                )
+                _remember_conversation_id(context, result)
+            finally:
+                await stop_typing(typing_task)
+            final_text = format_backend_response(result, language)
+            for part in split_message(final_text):
+                await send_html(update.message, part)
+        except (httpx.HTTPError, ValueError, TypeError) as error:
+            logger.warning(
+                "Could not get an answer from the FastAPI backend category=%s.",
+                type(error).__name__,
+            )
+            await send_html(update.message, ERROR_MESSAGES[language])
 
 
 def main() -> None:
@@ -322,6 +482,8 @@ def main() -> None:
     application = Application.builder().token(token).build()
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("reset", reset_command))
+    application.add_handler(CommandHandler("status", status_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_question))
 
     logger.info("Telegram bot is running with long polling.")

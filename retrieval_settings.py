@@ -24,4 +24,10 @@ def read_score_threshold(name: str, default: float) -> float:
 
 SEMANTIC_TOP_K = read_positive_int("SEMANTIC_TOP_K", 5)
 SEMANTIC_SCORE_THRESHOLD = read_score_threshold("SEMANTIC_SCORE_THRESHOLD", 0.20)
-LLM_MIN_CONTEXT_CHUNKS = read_positive_int("LLM_MIN_CONTEXT_CHUNKS", 3)
+SEMANTIC_FALLBACK_SAFE_MINIMUM = read_score_threshold(
+    "SEMANTIC_FALLBACK_SAFE_MINIMUM", 0.15
+)
+SEMANTIC_FALLBACK_SCORE_THRESHOLD = max(
+    read_score_threshold("SEMANTIC_FALLBACK_SCORE_THRESHOLD", 0.18),
+    SEMANTIC_FALLBACK_SAFE_MINIMUM,
+)

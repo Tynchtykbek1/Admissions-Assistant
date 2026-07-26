@@ -55,8 +55,50 @@ class DatabaseCompatibilityTests(unittest.TestCase):
                 )
 
             self.assertIn("embedding_model_name", columns)
+            self.assertIn("original_filename", columns)
             self.assertEqual(stored_model, "new-multilingual-model")
             self.assertEqual(stored_embedding, [0.25, 0.75])
+
+            with closing(sqlite3.connect(database_path)) as connection:
+                self.assertEqual(
+                    connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0],
+                    1,
+                )
+
+    def test_conversation_messages_reset_and_active_document(self):
+        with TemporaryDirectory() as temporary_directory:
+            database_path = Path(temporary_directory) / "conversation.db"
+            with patch.dict(os.environ, {"DATABASE_PATH": str(database_path)}):
+                database.initialize_database()
+                document_id = database.insert_document(
+                    "one.txt", "standard", "test-model"
+                )
+                first = database.get_or_create_conversation(
+                    "telegram", "chat-1", "user-1"
+                )
+                second = database.get_or_create_conversation(
+                    "telegram", "chat-2", "user-2"
+                )
+                database.update_active_document(first["id"], document_id)
+                database.add_message(first["id"], "user", "first")
+                database.add_message(first["id"], "assistant", "second")
+                database.add_message(first["id"], "user", "third")
+                database.add_message(second["id"], "user", "keep me")
+
+                recent = database.get_recent_messages(first["id"], 2)
+                cleared = database.clear_conversation_messages(first["id"])
+
+                self.assertEqual([item["content"] for item in recent], ["second", "third"])
+                self.assertEqual(cleared, 3)
+                self.assertEqual(database.get_recent_messages(first["id"], 10), [])
+                self.assertEqual(
+                    database.get_recent_messages(second["id"], 10)[0]["content"],
+                    "keep me",
+                )
+                self.assertEqual(
+                    database.get_conversation(first["id"])["active_document_id"],
+                    document_id,
+                )
 
     @staticmethod
     def create_old_database(database_path: Path) -> None:

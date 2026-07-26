@@ -11,20 +11,22 @@ from telegram_bot import (
     HELP_MESSAGES,
     NO_INFORMATION_MESSAGES,
     PROVIDER_UNAVAILABLE_MESSAGES,
+    RESET_MESSAGES,
     START_MESSAGES,
     format_backend_response,
     handle_question,
     help_command,
+    reset_command,
     split_message,
     stop_typing,
     start_command,
 )
 
 
-def make_update(text="question", language_code="ru"):
+def make_update(text="question", language_code="ru", chat_id=123, user_id=456):
     message = SimpleNamespace(text=text, reply_text=AsyncMock())
-    chat = SimpleNamespace(send_action=AsyncMock())
-    user = SimpleNamespace(language_code=language_code)
+    chat = SimpleNamespace(id=chat_id, send_action=AsyncMock())
+    user = SimpleNamespace(id=user_id, language_code=language_code)
     return SimpleNamespace(message=message, effective_chat=chat, effective_user=user)
 
 
@@ -33,14 +35,15 @@ class TelegramFormattingTests(unittest.TestCase):
         result = {
             "answer": "The deadline is 30 April.",
             "sources": [
-                {"filename": "admissions.pdf"},
-                {"filename": "admissions.pdf"},
-                {"filename": "faq.txt"},
+                {"filename": "admissions.pdf", "chunk_id": 1},
+                {"filename": "admissions.pdf", "chunk_id": 1},
+                {"filename": "faq.txt", "chunk_id": 2, "faq_id": 12},
             ],
         }
         formatted = format_backend_response(result)
         self.assertEqual(formatted.count("admissions.pdf"), 1)
         self.assertIn("faq.txt", formatted)
+        self.assertIn("FAQ 12", formatted)
 
     def test_removes_raw_markdown_and_escapes_html(self):
         formatted = format_backend_response({"answer": "**Документы** <важно>", "sources": []}, "ru")
@@ -147,14 +150,14 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=backend_result),
         ) as backend:
             await handle_question(update, SimpleNamespace())
-        backend.assert_awaited_once_with(update.message.text)
+        backend.assert_awaited_once_with(update.message.text, "123", "456", None)
 
     async def test_greeting_with_question_calls_backend(self):
         update = make_update("Привет, какие документы нужны для поступления?")
         backend_result = {"answer": "Нужен паспорт.", "sources": []}
         with patch("telegram_bot.ask_backend", new=AsyncMock(return_value=backend_result)) as backend:
             await handle_question(update, SimpleNamespace())
-        backend.assert_awaited_once_with(update.message.text)
+        backend.assert_awaited_once_with(update.message.text, "123", "456", None)
         update.effective_chat.send_action.assert_awaited_with(action=ChatAction.TYPING)
 
     async def test_russian_and_english_backend_fallbacks(self):
@@ -179,7 +182,7 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
     async def test_typing_starts_repeats_and_stops_after_completion(self):
         update = make_update("What documents?")
 
-        async def delayed_backend(_question):
+        async def delayed_backend(*_args):
             await asyncio.sleep(0.035)
             return {"status": "success", "answer": "Passport.", "sources": []}
 
@@ -197,7 +200,7 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
     async def test_typing_stops_after_backend_failure(self):
         update = make_update("What documents?")
 
-        async def failing_backend(_question):
+        async def failing_backend(*_args):
             await asyncio.sleep(0.025)
             raise httpx.ConnectError("synthetic failure")
 
@@ -222,7 +225,7 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
         update = make_update("What documents?")
         backend_started = asyncio.Event()
 
-        async def pending_backend(_question):
+        async def pending_backend(*_args):
             backend_started.set()
             await asyncio.Event().wait()
 
@@ -243,6 +246,62 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
             update.effective_chat.send_action.await_count,
             calls_after_cancellation,
         )
+
+    async def test_reset_is_localized_and_calls_backend_with_identifiers(self):
+        update = make_update("/reset")
+        context = SimpleNamespace(chat_data={})
+        result = {"conversation_id": "conversation-1", "cleared_messages": 2}
+        with patch(
+            "telegram_bot.reset_backend", new=AsyncMock(return_value=result)
+        ) as backend:
+            await reset_command(update, context)
+        backend.assert_awaited_once_with("123", "456", None)
+        self.assertEqual(context.chat_data["conversation_id"], "conversation-1")
+        self.assertEqual(
+            update.message.reply_text.await_args.args[0], RESET_MESSAGES["ru"]
+        )
+
+    async def test_same_chat_questions_are_serialized(self):
+        active = 0
+        maximum = 0
+
+        async def backend(*_args):
+            nonlocal active, maximum
+            active += 1
+            maximum = max(maximum, active)
+            await asyncio.sleep(0.02)
+            active -= 1
+            return {"status": "success", "answer": "ok", "sources": []}
+
+        first = make_update("Question one", chat_id=900)
+        second = make_update("Question two", chat_id=900)
+        with patch("telegram_bot.ask_backend", side_effect=backend):
+            await asyncio.gather(
+                handle_question(first, SimpleNamespace()),
+                handle_question(second, SimpleNamespace()),
+            )
+        self.assertEqual(maximum, 1)
+
+    async def test_different_chats_can_run_concurrently(self):
+        active = 0
+        maximum = 0
+
+        async def backend(*_args):
+            nonlocal active, maximum
+            active += 1
+            maximum = max(maximum, active)
+            await asyncio.sleep(0.02)
+            active -= 1
+            return {"status": "success", "answer": "ok", "sources": []}
+
+        first = make_update("Question one", chat_id=901)
+        second = make_update("Question two", chat_id=902)
+        with patch("telegram_bot.ask_backend", side_effect=backend):
+            await asyncio.gather(
+                handle_question(first, SimpleNamespace()),
+                handle_question(second, SimpleNamespace()),
+            )
+        self.assertEqual(maximum, 2)
 
     async def test_start_and_help_in_both_languages(self):
         for code, language in (("ru", "ru"), ("en-US", "en")):

@@ -1,35 +1,51 @@
 import logging
+import os
 import time
 import uuid
+from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pathlib import Path
-from pydantic import BaseModel, Field
 
+from answer_generator import generate_basic_answer
+from api_models import QuestionRequest, ResetRequest
+from app_settings import (
+    MAX_UPLOAD_SIZE_BYTES,
+    MAX_UPLOAD_SIZE_MB,
+    UPLOAD_READ_CHUNK_SIZE,
+)
+from conversation_service import reset_conversation, resolve_conversation
+from database import (
+    database_is_ready,
+    get_document,
+    get_latest_document,
+    initialize_database,
+    insert_document_with_chunks,
+    load_document_chunks,
+    update_active_document,
+)
 from document_processor import (
-    extract_text_from_txt,
     extract_text_from_pdf,
+    extract_text_from_txt,
     parse_faq_entries,
-    split_text_into_chunks
+    split_text_into_chunks,
+)
+from embedding_model import get_embedding_model, get_embedding_model_name
+from embedding_retriever import find_relevant_chunks_semantic
+from llm_answer_generator import PROVIDER_UNAVAILABLE
+from logging_config import configure_logging
+from rag_service import (
+    answer_conversation_question,
+    build_sources,
+    invalidate_document_cache,
+    safe_conversation_label,
 )
 from retriever import find_relevant_chunks
-from answer_generator import generate_basic_answer
-from embedding_model import get_embedding_model, get_embedding_model_name
-from embedding_retriever import find_relevant_chunks_semantic, normalize_retrieval_query
-from llm_answer_generator import PROVIDER_UNAVAILABLE, generate_llm_answer
-from logging_config import configure_logging, safe_log_text
-from database import (
-    initialize_database,
-    insert_document,
-    insert_chunk,
-    load_latest_document
-)
 from retrieval_settings import (
-    SEMANTIC_TOP_K,
+    SEMANTIC_FALLBACK_SCORE_THRESHOLD,
     SEMANTIC_SCORE_THRESHOLD,
-    LLM_MIN_CONTEXT_CHUNKS
+    SEMANTIC_TOP_K,
 )
 
 
@@ -37,71 +53,77 @@ configure_logging()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Admissions RAG Assistant")
-
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
-
 STATIC_DIR = Path("static")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
 initialize_database()
-DOCUMENT_CHUNKS = load_latest_document()
+
+ALLOWED_EXTENSIONS = {".txt", ".pdf"}
 
 
-class QuestionRequest(BaseModel):
-    question: str = Field(min_length=1)
+def _provider_configuration_ready() -> bool:
+    provider = os.getenv("LLM_PROVIDER", "").strip().lower()
+    if provider == "openai":
+        return bool(os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_MODEL"))
+    if provider == "gemini":
+        return bool(os.getenv("GEMINI_API_KEY") and os.getenv("GEMINI_MODEL"))
+    return False
 
 
-def build_sources(relevant_chunks: list[dict]) -> list[dict]:
-    sources = []
-
-    for chunk in relevant_chunks:
-        source = {
-            "chunk_id": chunk["chunk_id"],
-            "filename": chunk["filename"],
-            "score": chunk["score"],
-            "preview": chunk["text"][:200]
-        }
-
-        for diagnostic in ("faq_match_type", "faq_match_boost", "final_score"):
-            if diagnostic in chunk:
-                source[diagnostic] = chunk[diagnostic]
-
-        if "faq_id" in chunk:
-            source["faq_id"] = chunk["faq_id"]
-
-        sources.append(source)
-
-    return sources
-
-
-def build_answer_response(question: str, relevant_chunks: list[dict]) -> dict:
-    answer = generate_basic_answer(
-        question=question,
-        relevant_chunks=relevant_chunks
+def _resolve_request_document(request: QuestionRequest) -> tuple[dict, list[dict]]:
+    conversation = resolve_conversation(
+        conversation_id=request.conversation_id,
+        external_chat_id=request.external_chat_id,
+        external_user_id=request.external_user_id,
+        allow_latest_document_default=not request.external_chat_id,
     )
+    document_id = request.document_id or conversation["active_document_id"]
+    if document_id is None:
+        return conversation, []
+    if request.document_id is not None:
+        if get_document(document_id) is None:
+            raise HTTPException(status_code=404, detail="Document not found.")
+        update_active_document(conversation["id"], document_id)
+    return conversation, load_document_chunks(document_id)
 
-    return {
-        "question": question,
-        "answer": answer,
-        "sources": build_sources(relevant_chunks)
-    }
 
-
-def build_llm_answer_response(question: str, relevant_chunks: list[dict]) -> dict:
-    result = generate_llm_answer(
-        question=question,
-        relevant_chunks=relevant_chunks
+def _build_document_chunks(
+    extracted_text: str,
+    filename: str,
+) -> tuple[str, list[dict]]:
+    faq_entries = parse_faq_entries(extracted_text)
+    if faq_entries:
+        document_type = "faq"
+        chunks = [
+            {
+                "chunk_id": entry["faq_id"],
+                "faq_id": entry["faq_id"],
+                "question": entry["question"],
+                "answer": entry["answer"],
+                "text_for_retrieval": entry["text_for_retrieval"],
+                "text": entry["text"],
+            }
+            for entry in faq_entries
+        ]
+    else:
+        document_type = "standard"
+        chunks = [
+            {
+                "chunk_id": index,
+                "text_for_retrieval": text,
+                "text": text,
+            }
+            for index, text in enumerate(split_text_into_chunks(extracted_text))
+        ]
+    embeddings = get_embedding_model().encode(
+        [chunk["text_for_retrieval"] for chunk in chunks],
+        normalize_embeddings=True,
     )
-
-    return {
-        "question": question,
-        "answer": result.answer,
-        "sources": build_sources(relevant_chunks),
-        "status": result.status,
-        "provider": result.provider,
-        "provider_duration_ms": round(result.provider_duration_ms, 2),
-    }
+    for chunk, embedding in zip(chunks, embeddings):
+        chunk["filename"] = filename
+        chunk["embedding"] = embedding
+    return document_type, chunks
 
 
 @app.get("/")
@@ -114,175 +136,207 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/ready")
+def ready():
+    database_ready = database_is_ready()
+    provider_configured = _provider_configuration_ready()
+    status_code = 200 if database_ready and provider_configured else 503
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": "ready" if status_code == 200 else "not_ready",
+            "database": "ok" if database_ready else "unavailable",
+            "provider_configured": provider_configured,
+        },
+    )
+
+
 @app.get("/ui")
 def user_interface():
     return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.post("/upload")
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(
+    file: UploadFile = File(...),
+    conversation_id: str | None = Form(default=None),
+    external_chat_id: str | None = Form(default=None),
+    external_user_id: str | None = Form(default=None),
+):
     if not file.filename:
-        raise HTTPException(status_code=400, detail="The uploaded file must have a filename.")
-
-    safe_filename = Path(file.filename).name
-    file_path = UPLOAD_DIR / safe_filename
-
-    suffix = file_path.suffix.lower()
-
-    allowed_extensions = {".txt", ".pdf"}
-
-    if suffix not in allowed_extensions:
+        raise HTTPException(400, "The uploaded file must have a filename.")
+    original_filename = Path(file.filename).name
+    suffix = Path(original_filename).suffix.casefold()
+    if suffix not in ALLOWED_EXTENSIONS:
         raise HTTPException(
-            status_code=400,
-            detail="Unsupported file type. Please upload only .txt or .pdf files."
+            400, "Unsupported file type. Please upload only TXT or PDF files."
         )
 
-    content = await file.read()
-
-    with open(file_path, "wb") as saved_file:
-        saved_file.write(content)
-
+    stored_filename = f"{uuid.uuid4().hex}{suffix}"
+    file_path = UPLOAD_DIR / stored_filename
+    size = 0
+    header = b""
     try:
-        if suffix == ".txt":
-            extracted_text = extract_text_from_txt(file_path)
-        else:
-            extracted_text = extract_text_from_pdf(file_path)
+        with open(file_path, "xb") as output:
+            while chunk := await file.read(UPLOAD_READ_CHUNK_SIZE):
+                size += len(chunk)
+                if size > MAX_UPLOAD_SIZE_BYTES:
+                    raise HTTPException(
+                        413,
+                        f"File exceeds the {MAX_UPLOAD_SIZE_MB} MB upload limit.",
+                    )
+                if len(header) < 8:
+                    header += chunk[: 8 - len(header)]
+                output.write(chunk)
+        if size == 0:
+            raise HTTPException(400, "The uploaded file is empty.")
+        if suffix == ".pdf" and not header.startswith(b"%PDF-"):
+            raise HTTPException(400, "The uploaded file is not a valid PDF.")
+        if suffix == ".txt" and b"\x00" in header:
+            raise HTTPException(400, "The uploaded TXT file is not valid text.")
+
+        try:
+            extracted_text = (
+                extract_text_from_txt(file_path)
+                if suffix == ".txt"
+                else extract_text_from_pdf(file_path)
+            )
+        except Exception as error:
+            raise HTTPException(400, "The uploaded file could not be read.") from error
+        if not extracted_text.strip():
+            raise HTTPException(
+                400,
+                "No readable text was found. The document may be scanned or empty.",
+            )
+
+        document_type, chunks = _build_document_chunks(
+            extracted_text, original_filename
+        )
+        conversation = resolve_conversation(
+            conversation_id=conversation_id,
+            external_chat_id=external_chat_id,
+            external_user_id=external_user_id,
+            allow_latest_document_default=False,
+        )
+        document_id = insert_document_with_chunks(
+            original_filename,
+            stored_filename,
+            document_type,
+            get_embedding_model_name(),
+            chunks,
+            activate_conversation_id=conversation["id"],
+        )
+        invalidate_document_cache(document_id)
+    except HTTPException:
+        file_path.unlink(missing_ok=True)
+        raise
     except Exception as error:
         file_path.unlink(missing_ok=True)
-        raise HTTPException(
-            status_code=400,
-            detail="The uploaded file could not be read."
-        ) from error
+        logger.exception("Document processing failed without exposing file contents.")
+        raise HTTPException(500, "The document could not be processed.") from error
+    finally:
+        await file.close()
 
-    if not extracted_text:
-        file_path.unlink(missing_ok=True)
-        raise HTTPException(
-            status_code=400,
-            detail="No readable text was found in the document. The file may be scanned or empty."
-        )
-
-    faq_entries = parse_faq_entries(extracted_text)
-
-    if faq_entries:
-        document_type = "faq"
-        document_chunks = [
-            {
-                "chunk_id": entry["faq_id"],
-                "faq_id": entry["faq_id"],
-                "question": entry["question"],
-                "answer": entry["answer"],
-                "text_for_retrieval": entry["text_for_retrieval"],
-                "text": entry["text"]
-            }
-            for entry in faq_entries
-        ]
-    else:
-        document_type = "standard"
-        chunks = split_text_into_chunks(extracted_text)
-        document_chunks = [
-            {
-                "chunk_id": index,
-                "text_for_retrieval": chunk,
-                "text": chunk
-            }
-            for index, chunk in enumerate(chunks)
-        ]
-
-    model = get_embedding_model()
-    chunk_embeddings = model.encode(
-        [chunk["text_for_retrieval"] for chunk in document_chunks],
-        normalize_embeddings=True
-    )
-
-    DOCUMENT_CHUNKS.clear()
-
-    for chunk, embedding in zip(document_chunks, chunk_embeddings):
-        chunk["filename"] = safe_filename
-        chunk["embedding"] = embedding
-        DOCUMENT_CHUNKS.append(chunk)
-
-    document_id = insert_document(
-        safe_filename,
-        document_type,
-        get_embedding_model_name()
-    )
-
-    for chunk in DOCUMENT_CHUNKS:
-        insert_chunk(document_id, chunk)
-
-    response = {
-        "filename": safe_filename,
+    return {
+        "document_id": document_id,
+        "conversation_id": conversation["id"],
+        "filename": original_filename,
         "document_type": document_type,
-        "content_type": file.content_type,
-        "size_bytes": len(content),
-        "saved_to": str(file_path),
+        "size_bytes": size,
         "text_length": len(extracted_text),
-        "chunks_count": len(document_chunks),
-        "first_chunk": document_chunks[0]["text"] if document_chunks else None
+        "chunks_count": len(chunks),
+        **({"entries_count": len(chunks)} if document_type == "faq" else {}),
     }
 
-    if document_type == "faq":
-        response["entries_count"] = len(document_chunks)
 
+@app.post("/chat")
+def chat(request: QuestionRequest):
+    request_started_at = time.perf_counter()
+    try:
+        response = answer_conversation_question(
+            question=request.question.strip(),
+            conversation_id=request.conversation_id,
+            external_chat_id=request.external_chat_id,
+            external_user_id=request.external_user_id,
+            document_id=request.document_id,
+            allow_latest_document_default=not request.external_chat_id,
+        )
+    except ValueError as error:
+        raise HTTPException(404, str(error)) from error
+    logger.info(
+        "chat_request request_id=%s conversation=%s status=%s total_ms=%.2f",
+        uuid.uuid4().hex,
+        safe_conversation_label(response["conversation_id"]),
+        response["status"],
+        (time.perf_counter() - request_started_at) * 1000,
+    )
+    if response["status"] == PROVIDER_UNAVAILABLE:
+        return JSONResponse(status_code=503, content=response)
     return response
-
-
-@app.post("/ask")
-def ask_question(request: QuestionRequest):
-    relevant_chunks = find_relevant_chunks(
-        question=request.question,
-        chunks=DOCUMENT_CHUNKS
-    )
-
-    return build_answer_response(request.question, relevant_chunks)
-
-@app.post("/ask-semantic")
-def ask_question_semantic(request: QuestionRequest):
-    relevant_chunks = find_relevant_chunks_semantic(
-        question=request.question,
-        chunks=DOCUMENT_CHUNKS,
-        top_k=SEMANTIC_TOP_K,
-        min_score=max(SEMANTIC_SCORE_THRESHOLD, 0.30)
-    )
-
-    return build_answer_response(request.question, relevant_chunks)
 
 
 @app.post("/ask-llm")
 def ask_question_llm(request: QuestionRequest):
-    request_id = uuid.uuid4().hex
-    request_started_at = time.perf_counter()
-    retrieval_started_at = time.perf_counter()
-    normalized_query = normalize_retrieval_query(request.question)
-    relevant_chunks = find_relevant_chunks_semantic(
-        question=request.question,
-        chunks=DOCUMENT_CHUNKS,
+    return chat(request)
+
+
+@app.post("/conversation/reset")
+def reset(request: ResetRequest):
+    return reset_conversation(
+        conversation_id=request.conversation_id,
+        external_chat_id=request.external_chat_id,
+        external_user_id=request.external_user_id,
+    )
+
+
+@app.get("/conversation/status")
+def conversation_status(
+    conversation_id: str | None = None,
+    external_chat_id: str | None = None,
+    external_user_id: str | None = None,
+):
+    conversation = resolve_conversation(
+        conversation_id=conversation_id,
+        external_chat_id=external_chat_id,
+        external_user_id=external_user_id,
+        allow_latest_document_default=not external_chat_id,
+    )
+    document = (
+        get_document(conversation["active_document_id"])
+        if conversation["active_document_id"]
+        else None
+    )
+    return {
+        "status": "ok",
+        "conversation_id": conversation["id"],
+        "active_document_id": document["id"] if document else None,
+        "active_document_filename": document["filename"] if document else None,
+    }
+
+
+@app.post("/ask")
+def ask_question(request: QuestionRequest):
+    _, chunks = _resolve_request_document(request)
+    relevant = find_relevant_chunks(request.question, chunks)
+    return {
+        "question": request.question,
+        "answer": generate_basic_answer(request.question, relevant),
+        "sources": build_sources(relevant),
+    }
+
+
+@app.post("/ask-semantic")
+def ask_question_semantic(request: QuestionRequest):
+    _, chunks = _resolve_request_document(request)
+    relevant = find_relevant_chunks_semantic(
+        request.question,
+        chunks,
         top_k=SEMANTIC_TOP_K,
         min_score=SEMANTIC_SCORE_THRESHOLD,
-        min_context_chunks=LLM_MIN_CONTEXT_CHUNKS
+        fallback_score_threshold=SEMANTIC_FALLBACK_SCORE_THRESHOLD,
     )
-    retrieval_duration_ms = (time.perf_counter() - retrieval_started_at) * 1000
-    response = build_llm_answer_response(request.question, relevant_chunks)
-    total_duration_ms = (time.perf_counter() - request_started_at) * 1000
-
-    logger.info(
-        "ask_llm request_id=%s query=%r normalized_query=%r context_count=%d "
-        "chunk_ids=%s faq_ids=%s top_scores=%s provider=%s result=%s "
-        "retrieval_ms=%.2f provider_ms=%.2f total_ms=%.2f",
-        request_id,
-        safe_log_text(request.question),
-        safe_log_text(normalized_query),
-        len(relevant_chunks),
-        [chunk["chunk_id"] for chunk in relevant_chunks],
-        [chunk.get("faq_id") for chunk in relevant_chunks if chunk.get("faq_id") is not None],
-        [round(chunk["score"], 3) for chunk in relevant_chunks],
-        response["provider"],
-        response["status"],
-        retrieval_duration_ms,
-        response["provider_duration_ms"],
-        total_duration_ms,
-    )
-
-    if response["status"] == PROVIDER_UNAVAILABLE:
-        return JSONResponse(status_code=503, content=response)
-    return response
+    return {
+        "question": request.question,
+        "answer": generate_basic_answer(request.question, relevant),
+        "sources": build_sources(relevant),
+    }

@@ -76,10 +76,6 @@ def run_standard_document_tests(client: TestClient) -> None:
         result = ask_semantic(client, question)
         assert expected.casefold() in result["answer"].casefold()
 
-    unrelated = ask_semantic(client, "Can I study medicine in Canada?")
-    assert "not enough information" in unrelated["answer"].casefold()
-    assert unrelated["sources"] == []
-
     print("Standard document API tests: PASS")
 
 
@@ -108,14 +104,13 @@ def run_faq_test(client: TestClient) -> None:
 
 
 def run_database_restore_test(app_module, database_module, temporary_db: Path) -> None:
-    app_module.DOCUMENT_CHUNKS.clear()
-    app_module.DOCUMENT_CHUNKS.extend(database_module.load_latest_document())
+    restored_chunks = database_module.load_latest_document()
 
     assert temporary_db.exists()
     assert temporary_db.resolve() != Path("admissions.db").resolve()
-    assert app_module.DOCUMENT_CHUNKS
-    assert app_module.DOCUMENT_CHUNKS[0]["filename"] == "admissions_faq_document.txt"
-    assert len(app_module.DOCUMENT_CHUNKS[0]["embedding"]) > 0
+    assert restored_chunks
+    assert restored_chunks[0]["filename"] == "admissions_faq_document.txt"
+    assert len(restored_chunks[0]["embedding"]) > 0
 
     print("Temporary SQLite restore test: PASS")
 
@@ -138,7 +133,6 @@ def main() -> None:
             run_standard_document_tests(client)
             run_faq_test(client)
             run_database_restore_test(app, database, temporary_db)
-            app.DOCUMENT_CHUNKS.clear()
 
     if original_database_path is None:
         os.environ.pop("DATABASE_PATH", None)

@@ -6,7 +6,6 @@ from database import (
     clear_conversation_messages,
     count_document_chunks,
     get_document,
-    get_latest_document,
     get_or_create_conversation,
     synchronize_conversations_active_document,
     update_active_document,
@@ -24,6 +23,10 @@ class SystemDocumentState:
 
 
 class DocumentSelectionConflict(ValueError):
+    pass
+
+
+class TelegramIdentityRequired(ValueError):
     pass
 
 
@@ -80,11 +83,12 @@ def resolve_conversation(
     conversation_id: str | None,
     external_chat_id: str | None,
     external_user_id: str | None,
-    allow_latest_document_default: bool,
     requested_document_id: int | None = None,
 ) -> dict:
-    channel = "telegram" if external_chat_id else "web"
-    chat_id = external_chat_id or conversation_id or "default-local"
+    if not external_chat_id or not external_chat_id.strip():
+        raise TelegramIdentityRequired("external_chat_id is required.")
+    channel = "telegram"
+    chat_id = external_chat_id.strip()
     state = get_system_document_state()
 
     if state.configured and requested_document_id is not None:
@@ -98,16 +102,7 @@ def resolve_conversation(
                 "The configured system document cannot be changed by a client."
             )
 
-    latest = (
-        get_latest_document()
-        if not state.configured and allow_latest_document_default
-        else None
-    )
-    default_document_id = (
-        state.document["id"]
-        if state.document is not None
-        else latest["id"] if latest else None
-    )
+    default_document_id = state.document["id"] if state.document is not None else None
     conversation = get_or_create_conversation(
         channel,
         chat_id,
@@ -121,8 +116,9 @@ def resolve_conversation(
                 state.failure_category or "unavailable",
                 conversation,
             )
-        synchronize_conversations_active_document(state.document["id"])
-        conversation["active_document_id"] = state.document["id"]
+        if conversation["active_document_id"] != state.document["id"]:
+            update_active_document(conversation["id"], state.document["id"])
+            conversation["active_document_id"] = state.document["id"]
     elif requested_document_id is not None:
         if get_document(requested_document_id) is None:
             raise ValueError("The requested document does not exist.")
@@ -143,7 +139,6 @@ def reset_conversation(
             conversation_id=conversation_id,
             external_chat_id=external_chat_id,
             external_user_id=external_user_id,
-            allow_latest_document_default=not external_chat_id,
         )
     except SystemDocumentUnavailable as error:
         if error.conversation is None:

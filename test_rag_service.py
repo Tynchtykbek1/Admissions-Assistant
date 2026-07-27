@@ -3,6 +3,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
+import app_settings
 import database
 import rag_service
 from llm_answer_generator import LLMAnswerResult
@@ -12,6 +13,8 @@ from question_rewriter import RewriteResult
 @pytest.fixture
 def isolated_database(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "rag.db"))
+    monkeypatch.setattr(app_settings, "SYSTEM_DOCUMENT_ID", None)
+    monkeypatch.setattr(app_settings, "SYSTEM_DOCUMENT_ID_INVALID", False)
     database.initialize_database()
     rag_service.invalidate_document_cache()
     yield
@@ -72,6 +75,8 @@ def test_retrieval_uses_rewritten_standalone_question(isolated_database):
         response = rag_service.answer_conversation_question(
             question="А кому надо написать?",
             conversation_id=conversation["id"],
+            external_chat_id="chat",
+            external_user_id="user",
         )
 
     assert retrieval.call_args.kwargs["question"] == rewritten
@@ -81,7 +86,7 @@ def test_retrieval_uses_rewritten_standalone_question(isolated_database):
 def test_no_relevant_chunks_skips_answer_provider(isolated_database):
     document_id = add_document("guide.txt", "Only unrelated content.")
     conversation = database.get_or_create_conversation(
-        "web", "one", default_document_id=document_id
+        "telegram", "one", "user-one", default_document_id=document_id
     )
     with (
         patch("rag_service.rewrite_question", return_value=RewriteResult("unknown", False)),
@@ -91,6 +96,8 @@ def test_no_relevant_chunks_skips_answer_provider(isolated_database):
         response = rag_service.answer_conversation_question(
             question="unknown",
             conversation_id=conversation["id"],
+            external_chat_id="one",
+            external_user_id="user-one",
         )
     provider.assert_not_called()
     assert response["status"] == "insufficient_document_information"
@@ -100,7 +107,7 @@ def test_no_relevant_chunks_skips_answer_provider(isolated_database):
 def test_partial_status_and_sources_survive(isolated_database):
     document_id = add_document("visa.txt", "Passport is mentioned.")
     conversation = database.get_or_create_conversation(
-        "web", "partial", default_document_id=document_id
+        "telegram", "partial", "user-partial", default_document_id=document_id
     )
     relevant = [{
         "chunk_id": 0,
@@ -119,15 +126,22 @@ def test_partial_status_and_sources_survive(isolated_database):
         ),
     ):
         response = rag_service.answer_conversation_question(
-            question="Which visa documents?", conversation_id=conversation["id"]
+            question="Which visa documents?",
+            conversation_id=conversation["id"],
+            external_chat_id="partial",
+            external_user_id="user-partial",
         )
     assert response["status"] == "partial_information"
     assert response["sources"][0]["faq_id"] == 12
 
 
-def test_two_conversations_keep_documents_isolated(isolated_database):
+def test_two_conversations_use_shared_system_document(
+    isolated_database,
+    monkeypatch,
+):
     first_document = add_document("first.txt", "First document fact.")
     second_document = add_document("second.txt", "Second document fact.")
+    monkeypatch.setattr(app_settings, "SYSTEM_DOCUMENT_ID", first_document)
     first = database.get_or_create_conversation(
         "telegram", "chat-1", default_document_id=first_document
     )
@@ -154,15 +168,19 @@ def test_two_conversations_keep_documents_isolated(isolated_database):
         patch("rag_service.generate_llm_answer", side_effect=capture_answer),
     ):
         first_response = rag_service.answer_conversation_question(
-            question="fact?", conversation_id=first["id"]
+            question="fact?",
+            conversation_id=first["id"],
+            external_chat_id="chat-1",
         )
         second_response = rag_service.answer_conversation_question(
-            question="fact?", conversation_id=second["id"]
+            question="fact?",
+            conversation_id=second["id"],
+            external_chat_id="chat-2",
         )
 
-    assert supplied_filenames == ["first.txt", "second.txt"]
+    assert supplied_filenames == ["first.txt", "first.txt"]
     assert first_response["document_id"] == first_document
-    assert second_response["document_id"] == second_document
+    assert second_response["document_id"] == first_document
 
 
 def test_answer_uses_bounded_canonical_history_without_current_duplicate(
@@ -170,7 +188,7 @@ def test_answer_uses_bounded_canonical_history_without_current_duplicate(
 ):
     document_id = add_document("history.txt", "Supported fact.")
     conversation = database.get_or_create_conversation(
-        "web", "history", default_document_id=document_id
+        "telegram", "history", "history-user", default_document_id=document_id
     )
     for index in range(10):
         database.add_message(
@@ -195,7 +213,10 @@ def test_answer_uses_bounded_canonical_history_without_current_duplicate(
         patch("rag_service.generate_llm_answer", side_effect=capture),
     ):
         rag_service.answer_conversation_question(
-            question="current-message", conversation_id=conversation["id"]
+            question="current-message",
+            conversation_id=conversation["id"],
+            external_chat_id="history",
+            external_user_id="history-user",
         )
     assert len(captured_history) == rag_service.CHAT_HISTORY_LIMIT
     assert captured_history[0]["content"] == "previous-2"

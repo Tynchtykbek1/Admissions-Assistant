@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import os
@@ -14,6 +15,11 @@ from embedding_model import get_embedding_model, get_embedding_model_name
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+UNANSWERED_QUESTION_STATUSES = {"open", "reviewed", "resolved", "ignored"}
+
+
+class ConversationIdentityMismatch(ValueError):
+    pass
 
 
 def _utc_now() -> str:
@@ -26,9 +32,11 @@ def get_database_path() -> Path:
 
 
 def get_connection() -> sqlite3.Connection:
-    connection = sqlite3.connect(get_database_path())
+    connection = sqlite3.connect(get_database_path(), timeout=30.0)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA busy_timeout = 30000")
+    connection.execute("PRAGMA journal_mode = WAL")
     return connection
 
 
@@ -44,6 +52,64 @@ def _add_column_if_missing(
     }
     if column not in columns:
         connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+
+
+def _merge_duplicate_conversations(connection: sqlite3.Connection) -> int:
+    duplicate_groups = connection.execute(
+        """
+        SELECT channel, external_chat_id, COALESCE(external_user_id, '') AS user_key
+        FROM conversations
+        GROUP BY channel, external_chat_id, COALESCE(external_user_id, '')
+        HAVING COUNT(*) > 1
+        """
+    ).fetchall()
+    merged = 0
+    for group in duplicate_groups:
+        rows = connection.execute(
+            """
+            SELECT id, active_document_id
+            FROM conversations
+            WHERE channel = ? AND external_chat_id = ?
+              AND COALESCE(external_user_id, '') = ?
+            ORDER BY created_at, rowid
+            """,
+            (group["channel"], group["external_chat_id"], group["user_key"]),
+        ).fetchall()
+        canonical_id = rows[0]["id"]
+        if rows[0]["active_document_id"] is None:
+            replacement_document_id = next(
+                (
+                    row["active_document_id"]
+                    for row in rows[1:]
+                    if row["active_document_id"] is not None
+                ),
+                None,
+            )
+            if replacement_document_id is not None:
+                connection.execute(
+                    """
+                    UPDATE conversations
+                    SET active_document_id = ?
+                    WHERE id = ?
+                    """,
+                    (replacement_document_id, canonical_id),
+                )
+        for duplicate in rows[1:]:
+            connection.execute(
+                "UPDATE messages SET conversation_id = ? WHERE conversation_id = ?",
+                (canonical_id, duplicate["id"]),
+            )
+            connection.execute(
+                "DELETE FROM conversations WHERE id = ?",
+                (duplicate["id"],),
+            )
+            merged += 1
+    if merged:
+        logger.warning(
+            "Merged %d duplicate conversation rows while preserving messages.",
+            merged,
+        )
+    return merged
 
 
 def initialize_database() -> None:
@@ -93,6 +159,24 @@ def initialize_database() -> None:
                 FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS unanswered_questions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                normalized_hash TEXT UNIQUE NOT NULL,
+                question TEXT NOT NULL,
+                standalone_question TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                occurrence_count INTEGER NOT NULL DEFAULT 1,
+                max_similarity_score REAL NULL,
+                retrieved_faq_ids TEXT NULL,
+                first_seen_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open'
+                    CHECK(status IN ('open', 'reviewed', 'resolved', 'ignored')),
+                resolved_document_id INTEGER NULL,
+                reviewed_at TEXT NULL,
+                FOREIGN KEY(resolved_document_id) REFERENCES documents(id) ON DELETE SET NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_chunks_document_id
                 ON chunks(document_id);
             CREATE INDEX IF NOT EXISTS idx_chunks_document_chunk
@@ -101,6 +185,8 @@ def initialize_database() -> None:
                 ON conversations(channel, external_chat_id, external_user_id);
             CREATE INDEX IF NOT EXISTS idx_messages_conversation_created
                 ON messages(conversation_id, id);
+            CREATE INDEX IF NOT EXISTS idx_unanswered_status_last_seen
+                ON unanswered_questions(status, last_seen_at);
             """
         )
         _add_column_if_missing(
@@ -114,6 +200,17 @@ def initialize_database() -> None:
             SET original_filename = COALESCE(original_filename, filename),
                 stored_filename = COALESCE(stored_filename, filename)
             WHERE original_filename IS NULL OR stored_filename IS NULL
+            """
+        )
+        _merge_duplicate_conversations(connection)
+        connection.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_conversations_external_identity
+            ON conversations(
+                channel,
+                external_chat_id,
+                COALESCE(external_user_id, '')
+            )
             """
         )
 
@@ -325,56 +422,60 @@ def get_or_create_conversation(
     default_document_id: int | None = None,
 ) -> dict:
     now = _utc_now()
-    with closing(get_connection()) as connection, connection:
+    with closing(get_connection()) as connection:
+        connection.execute("BEGIN IMMEDIATE")
         row = None
-        if conversation_id:
-            row = connection.execute(
-                "SELECT * FROM conversations WHERE id = ?",
-                (conversation_id,),
-            ).fetchone()
-            if (
-                row is not None
-                and channel == "telegram"
-                and (
+        try:
+            if conversation_id:
+                row = connection.execute(
+                    "SELECT * FROM conversations WHERE id = ?",
+                    (conversation_id,),
+                ).fetchone()
+                if row is not None and (
                     row["channel"] != channel
                     or row["external_chat_id"] != external_chat_id
                     or (row["external_user_id"] or "") != (external_user_id or "")
+                ):
+                    raise ConversationIdentityMismatch(
+                        "Conversation identifiers do not match."
+                    )
+            if row is None:
+                row = connection.execute(
+                    """
+                    SELECT * FROM conversations
+                    WHERE channel = ? AND external_chat_id = ?
+                      AND COALESCE(external_user_id, '') = COALESCE(?, '')
+                    ORDER BY created_at LIMIT 1
+                    """,
+                    (channel, external_chat_id, external_user_id),
+                ).fetchone()
+            if row is None:
+                new_id = conversation_id or uuid.uuid4().hex
+                connection.execute(
+                    """
+                    INSERT INTO conversations (
+                        id, channel, external_chat_id, external_user_id,
+                        active_document_id, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        new_id,
+                        channel,
+                        external_chat_id,
+                        external_user_id,
+                        default_document_id,
+                        now,
+                        now,
+                    ),
                 )
-            ):
-                raise ValueError("Conversation identifiers do not match.")
-        if row is None:
-            row = connection.execute(
-                """
-                SELECT * FROM conversations
-                WHERE channel = ? AND external_chat_id = ?
-                  AND COALESCE(external_user_id, '') = COALESCE(?, '')
-                ORDER BY created_at LIMIT 1
-                """,
-                (channel, external_chat_id, external_user_id),
-            ).fetchone()
-        if row is None:
-            new_id = conversation_id or uuid.uuid4().hex
-            connection.execute(
-                """
-                INSERT INTO conversations (
-                    id, channel, external_chat_id, external_user_id,
-                    active_document_id, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    new_id,
-                    channel,
-                    external_chat_id,
-                    external_user_id,
-                    default_document_id,
-                    now,
-                    now,
-                ),
-            )
-            row = connection.execute(
-                "SELECT * FROM conversations WHERE id = ?",
-                (new_id,),
-            ).fetchone()
+                row = connection.execute(
+                    "SELECT * FROM conversations WHERE id = ?",
+                    (new_id,),
+                ).fetchone()
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
     return dict(row)
 
 
@@ -480,6 +581,154 @@ def database_is_ready() -> bool:
         return True
     except sqlite3.Error:
         return False
+
+
+def _normalized_question_hash(standalone_question: str) -> str:
+    normalized = " ".join(standalone_question.casefold().split())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _parse_faq_ids(value: str | None) -> set[int]:
+    if not value:
+        return set()
+    try:
+        parsed = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return set()
+    return {
+        int(item)
+        for item in parsed
+        if isinstance(item, int) or (isinstance(item, str) and item.isdigit())
+    }
+
+
+def record_unanswered_question(
+    *,
+    question: str,
+    standalone_question: str,
+    reason: str,
+    max_similarity_score: float | None = None,
+    retrieved_faq_ids: list[int] | None = None,
+) -> dict:
+    normalized_hash = _normalized_question_hash(standalone_question)
+    now = _utc_now()
+    new_faq_ids = {int(item) for item in (retrieved_faq_ids or [])}
+    with closing(get_connection()) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            existing = connection.execute(
+                """
+                SELECT id, max_similarity_score, retrieved_faq_ids
+                FROM unanswered_questions
+                WHERE normalized_hash = ?
+                """,
+                (normalized_hash,),
+            ).fetchone()
+            if existing is None:
+                connection.execute(
+                    """
+                    INSERT INTO unanswered_questions (
+                        normalized_hash, question, standalone_question, reason,
+                        occurrence_count, max_similarity_score, retrieved_faq_ids,
+                        first_seen_at, last_seen_at, status
+                    ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, 'open')
+                    """,
+                    (
+                        normalized_hash,
+                        question.strip(),
+                        standalone_question.strip(),
+                        reason,
+                        max_similarity_score,
+                        json.dumps(sorted(new_faq_ids)) if new_faq_ids else None,
+                        now,
+                        now,
+                    ),
+                )
+            else:
+                stored_score = existing["max_similarity_score"]
+                highest_score = (
+                    max(
+                        score
+                        for score in (stored_score, max_similarity_score)
+                        if score is not None
+                    )
+                    if stored_score is not None or max_similarity_score is not None
+                    else None
+                )
+                all_faq_ids = _parse_faq_ids(
+                    existing["retrieved_faq_ids"]
+                ) | new_faq_ids
+                connection.execute(
+                    """
+                    UPDATE unanswered_questions
+                    SET occurrence_count = occurrence_count + 1,
+                        last_seen_at = ?,
+                        max_similarity_score = ?,
+                        retrieved_faq_ids = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        now,
+                        highest_score,
+                        json.dumps(sorted(all_faq_ids)) if all_faq_ids else None,
+                        existing["id"],
+                    ),
+                )
+            row = connection.execute(
+                "SELECT * FROM unanswered_questions WHERE normalized_hash = ?",
+                (normalized_hash,),
+            ).fetchone()
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+    return dict(row)
+
+
+def list_unanswered_questions(
+    statuses: list[str] | tuple[str, ...] | None = None,
+) -> list[dict]:
+    selected = tuple(statuses or ("open", "reviewed"))
+    if not selected:
+        return []
+    invalid = set(selected) - UNANSWERED_QUESTION_STATUSES
+    if invalid:
+        raise ValueError("Invalid unanswered-question status.")
+    placeholders = ", ".join("?" for _ in selected)
+    with closing(get_connection()) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT id, question, standalone_question, occurrence_count,
+                   max_similarity_score, retrieved_faq_ids, reason, status,
+                   first_seen_at, last_seen_at
+            FROM unanswered_questions
+            WHERE status IN ({placeholders})
+            ORDER BY last_seen_at DESC, id DESC
+            """,
+            selected,
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def mark_unanswered_question_status(
+    question_id: int,
+    status: str,
+    *,
+    resolved_document_id: int | None = None,
+) -> bool:
+    if status not in UNANSWERED_QUESTION_STATUSES:
+        raise ValueError("Invalid unanswered-question status.")
+    reviewed_at = _utc_now() if status != "open" else None
+    with closing(get_connection()) as connection, connection:
+        cursor = connection.execute(
+            """
+            UPDATE unanswered_questions
+            SET status = ?, resolved_document_id = ?, reviewed_at = ?
+            WHERE id = ?
+            """,
+            (status, resolved_document_id, reviewed_at, question_id),
+        )
+        return cursor.rowcount == 1
 
 
 def clear_document(document_id: int) -> None:

@@ -50,9 +50,7 @@ def _add_document(database, filename: str, *, with_chunks: bool = True) -> int:
     )
 
 
-def test_new_telegram_and_web_conversations_receive_system_document(
-    tmp_path, monkeypatch
-):
+def test_new_telegram_conversation_receives_system_document(tmp_path, monkeypatch):
     _, database, service, _, _ = _load_modules(tmp_path, monkeypatch)
     system_id = _add_document(database, "system.txt")
 
@@ -60,26 +58,20 @@ def test_new_telegram_and_web_conversations_receive_system_document(
         conversation_id=None,
         external_chat_id="telegram-chat",
         external_user_id="telegram-user",
-        allow_latest_document_default=False,
-    )
-    web = service.resolve_conversation(
-        conversation_id=None,
-        external_chat_id=None,
-        external_user_id=None,
-        allow_latest_document_default=True,
     )
 
     assert telegram["active_document_id"] == system_id
-    assert web["active_document_id"] == system_id
 
 
-def test_existing_null_and_old_document_conversations_are_repaired(
+def test_startup_sync_repairs_all_conversations_and_preserves_messages(
     tmp_path, monkeypatch
 ):
     _, database, service, _, _ = _load_modules(tmp_path, monkeypatch, "2")
     old_id = _add_document(database, "old.txt")
     system_id = _add_document(database, "system.txt")
-    without_document = database.get_or_create_conversation("web", "null-document")
+    without_document = database.get_or_create_conversation(
+        "telegram", "null-document", "null-user"
+    )
     old_document = database.get_or_create_conversation(
         "telegram",
         "old-document",
@@ -87,14 +79,10 @@ def test_existing_null_and_old_document_conversations_are_repaired(
     )
     database.add_message(old_document["id"], "user", "Keep this message")
 
-    service.resolve_conversation(
-        conversation_id=without_document["id"],
-        external_chat_id=None,
-        external_user_id=None,
-        allow_latest_document_default=True,
-    )
+    state = service.synchronize_system_document_conversations()
 
     assert system_id == 2
+    assert state.document["id"] == system_id
     assert (
         database.get_conversation(without_document["id"])["active_document_id"]
         == system_id
@@ -118,17 +106,11 @@ def test_changing_system_document_switches_all_conversations(
         conversation_id=None,
         external_chat_id="chat",
         external_user_id="user",
-        allow_latest_document_default=False,
     )
     assert conversation["active_document_id"] == first_id
 
     monkeypatch.setattr(settings, "SYSTEM_DOCUMENT_ID", second_id)
-    service.resolve_conversation(
-        conversation_id=conversation["id"],
-        external_chat_id="chat",
-        external_user_id="user",
-        allow_latest_document_default=False,
-    )
+    service.synchronize_system_document_conversations()
 
     assert (
         database.get_conversation(conversation["id"])["active_document_id"]
@@ -180,7 +162,12 @@ def test_client_cannot_override_system_document_on_any_question_endpoint(
         for endpoint in ("/chat", "/ask-llm", "/ask", "/ask-semantic"):
             response = client.post(
                 endpoint,
-                json={"question": "What is required?", "document_id": other_id},
+                json={
+                    "question": "What is required?",
+                    "document_id": other_id,
+                    "external_chat_id": "chat",
+                    "external_user_id": "user",
+                },
             )
             assert response.status_code == 409, endpoint
 
@@ -192,7 +179,14 @@ def test_missing_or_empty_system_document_is_controlled(
     _add_document(database, "empty.txt", with_chunks=False)
 
     with TestClient(app_module.app) as client:
-        missing = client.post("/chat", json={"question": "What is required?"})
+        missing = client.post(
+            "/chat",
+            json={
+                "question": "What is required?",
+                "external_chat_id": "chat",
+                "external_user_id": "user",
+            },
+        )
     assert missing.status_code == 503
     assert missing.json()["status"] == "system_document_unavailable"
     assert missing.json()["sources"] == []
@@ -203,7 +197,14 @@ def test_missing_or_empty_system_document_is_controlled(
 
     importlib.reload(app_settings)
     with TestClient(app_module.app) as client:
-        empty = client.post("/chat", json={"question": "What is required?"})
+        empty = client.post(
+            "/chat",
+            json={
+                "question": "What is required?",
+                "external_chat_id": "chat",
+                "external_user_id": "user",
+            },
+        )
     assert empty.status_code == 503
     assert empty.json()["status"] == "system_document_unavailable"
 
@@ -255,7 +256,12 @@ def test_chat_uses_system_document_and_accepts_matching_id(
     with TestClient(app_module.app) as client:
         response = client.post(
             "/chat",
-            json={"question": "What is required?", "document_id": system_id},
+            json={
+                "question": "What is required?",
+                "document_id": system_id,
+                "external_chat_id": "chat",
+                "external_user_id": "user",
+            },
         )
 
     assert response.status_code == 200
@@ -270,8 +276,110 @@ def test_invalid_system_document_setting_never_falls_back_to_latest(
     latest_id = _add_document(database, "latest.txt")
 
     with TestClient(app_module.app) as client:
-        response = client.post("/chat", json={"question": "What is required?"})
+        response = client.post(
+            "/chat",
+            json={
+                "question": "What is required?",
+                "external_chat_id": "chat",
+                "external_user_id": "user",
+            },
+        )
 
     assert latest_id == 1
     assert response.status_code == 503
     assert response.json()["status"] == "system_document_unavailable"
+
+
+def test_missing_telegram_identity_is_rejected_by_all_conversation_endpoints(
+    tmp_path, monkeypatch
+):
+    _, database, _, _, app_module = _load_modules(tmp_path, monkeypatch)
+    _add_document(database, "system.txt")
+
+    with TestClient(app_module.app) as client:
+        for endpoint in ("/chat", "/ask-llm", "/ask", "/ask-semantic"):
+            response = client.post(endpoint, json={"question": "Question?"})
+            assert response.status_code == 400, endpoint
+        reset = client.post("/conversation/reset", json={})
+        status = client.get("/conversation/status")
+
+    assert reset.status_code == 400
+    assert status.status_code == 400
+
+
+def test_foreign_conversation_id_cannot_be_reused(tmp_path, monkeypatch):
+    _, database, service, _, app_module = _load_modules(tmp_path, monkeypatch)
+    _add_document(database, "system.txt")
+    owner = service.resolve_conversation(
+        conversation_id=None,
+        external_chat_id="owner-chat",
+        external_user_id="owner-user",
+    )
+
+    with TestClient(app_module.app) as client:
+        response = client.get(
+            "/conversation/status",
+            params={
+                "conversation_id": owner["id"],
+                "external_chat_id": "attacker-chat",
+                "external_user_id": "attacker-user",
+            },
+        )
+
+    assert response.status_code == 403
+
+
+def test_normal_request_repairs_only_current_conversation(tmp_path, monkeypatch):
+    _, database, service, _, _ = _load_modules(tmp_path, monkeypatch, "2")
+    old_id = _add_document(database, "old.txt")
+    system_id = _add_document(database, "system.txt")
+    current = database.get_or_create_conversation(
+        "telegram", "current-chat", "current-user", default_document_id=old_id
+    )
+    untouched = database.get_or_create_conversation(
+        "telegram", "other-chat", "other-user", default_document_id=old_id
+    )
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            service,
+            "synchronize_conversations_active_document",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("bulk synchronization ran during a request")
+            ),
+        )
+        resolved = service.resolve_conversation(
+            conversation_id=current["id"],
+            external_chat_id="current-chat",
+            external_user_id="current-user",
+        )
+
+    assert resolved["active_document_id"] == system_id
+    assert database.get_conversation(untouched["id"])["active_document_id"] == old_id
+
+
+def test_correct_conversation_does_not_update_document(tmp_path, monkeypatch):
+    _, database, service, _, _ = _load_modules(tmp_path, monkeypatch)
+    system_id = _add_document(database, "system.txt")
+    conversation = database.get_or_create_conversation(
+        "telegram",
+        "correct-chat",
+        "correct-user",
+        default_document_id=system_id,
+    )
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            service,
+            "update_active_document",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("unexpected document update")
+            ),
+        )
+        resolved = service.resolve_conversation(
+            conversation_id=conversation["id"],
+            external_chat_id="correct-chat",
+            external_user_id="correct-user",
+        )
+
+    assert resolved["active_document_id"] == system_id

@@ -8,7 +8,7 @@ OpenAI.
 ## Architecture
 
 ```text
-Browser / Telegram
+Telegram
         |
         v
 FastAPI /chat
@@ -56,11 +56,12 @@ Retrieval query: Можно ли подать документы раньше с
 
 Every upload receives a database document ID and a UUID-based stored filename. The
 original filename is retained for display. In production, `SYSTEM_DOCUMENT_ID`
-selects one admissions knowledge document for every browser and Telegram
-conversation. New conversations receive it automatically. Existing conversations
-with no document or an older document are synchronized to it transactionally,
-without changing their messages. Conversation histories remain separate even
-though retrieval uses the same document.
+selects one admissions knowledge document for every Telegram conversation. New
+conversations receive it automatically. At backend startup, existing conversations
+with no document or an older document are synchronized to it transactionally
+without changing their messages. Normal requests repair only the current
+conversation when necessary. Conversation histories remain separate even though
+retrieval uses the same document.
 
 Clients cannot switch documents while system-document mode is configured. A
 conflicting `document_id` receives HTTP 409; sending the configured ID is accepted
@@ -100,10 +101,15 @@ Content-Type: application/json
 {
   "question": "А раньше можно?",
   "conversation_id": "optional",
-  "external_chat_id": "optional",
+  "external_chat_id": "required",
   "external_user_id": "optional"
 }
 ```
+
+All conversation endpoints are Telegram-only. Requests without
+`external_chat_id` return HTTP 400. A saved `conversation_id` is accepted only
+when its chat and optional user identifiers match, preventing one Telegram user
+from reusing another user's conversation.
 
 `document_id` remains in the request model for backward compatibility. When
 `SYSTEM_DOCUMENT_ID` is set, it cannot select any other document.
@@ -120,7 +126,8 @@ timings. Supported answer statuses are:
   or empty
 
 `POST /ask-llm` delegates to the same flow for backward compatibility.
-`/ask` and `/ask-semantic` remain available for the browser's basic modes.
+`/ask` and `/ask-semantic` remain available as legacy Telegram-identified API
+endpoints.
 
 Other endpoints:
 
@@ -141,6 +148,29 @@ Other endpoints:
 Questions from the same Telegram chat are serialized so replies cannot overtake one
 another. Different chats are processed concurrently. Backend/provider text is
 escaped before Telegram HTML rendering.
+
+## Unanswered-question review
+
+The backend records a question for later review when retrieval finds no accepted
+chunks, or when retrieved context leads to the controlled
+`insufficient_document_information` result. It does not record successful,
+partial, provider-unavailable, or system-document-unavailable requests.
+
+Equivalent standalone questions are deduplicated using a normalized SHA-256 hash.
+The database retains the first original wording, occurrence count, highest
+observed score, relevant FAQ IDs, reason, and timestamps. Telegram identity and
+profile data are not stored in this table.
+
+Until a protected administrator panel is available, export open and reviewed
+questions with:
+
+```shell
+python scripts/export_unanswered_questions.py
+python scripts/export_unanswered_questions.py --output unanswered.csv
+python scripts/export_unanswered_questions.py --status open --output unanswered-open.csv
+```
+
+The exporter reads `DATABASE_PATH`, writes UTF-8 CSV, and never modifies records.
 
 ## Configuration
 
@@ -175,8 +205,8 @@ docker compose logs -f
 docker compose down
 ```
 
-The backend is at <http://localhost:8000>, the UI at
-<http://localhost:8000/ui>, and liveness at <http://localhost:8000/health>.
+The backend is at <http://localhost:8000> and liveness is at
+<http://localhost:8000/health>. There is no public browser UI.
 
 Named volumes persist:
 
@@ -207,9 +237,15 @@ python telegram_bot.py
 
 ## SQLite persistence and reset
 
-Startup applies additive `CREATE TABLE IF NOT EXISTS` and column migrations.
-Existing document/chunk data is retained. Conversations, active document IDs, and
-messages survive restarts.
+Startup applies additive `CREATE TABLE IF NOT EXISTS`, index, and column
+migrations. Existing document/chunk data is retained. Conversations, active
+document IDs, messages, and unanswered questions survive restarts. SQLite uses
+WAL mode and a 30-second busy timeout.
+
+The conversation identity migration adds uniqueness across channel, chat ID, and
+optional user ID. If duplicate rows exist, the oldest conversation is retained,
+all messages are reassigned to it, and only the now-empty duplicate conversation
+rows are removed.
 
 Changing `SYSTEM_DOCUMENT_ID` and recreating the application containers updates
 all conversation document references in one transaction. Documents, chunks, and
@@ -232,7 +268,7 @@ mocked Gemini/OpenAI/Telegram calls:
 
 ```shell
 python -m pytest -q
-python -m compileall .
+python -m compileall -x ".venv" .
 docker compose config --quiet
 docker build -t admissions-rag-assistant:local .
 ```
@@ -246,4 +282,5 @@ docker build -t admissions-rag-assistant:local .
 - Scanned PDFs require OCR before upload.
 - Telegram does not upload or select documents. An administrator manages the
   shared document through the upload API and `SYSTEM_DOCUMENT_ID`.
+- A protected document/statistics/review administration panel is not implemented.
 - The first embedding operation may download the configured model and take longer.

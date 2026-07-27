@@ -87,5 +87,4 @@ def test_persistence_failure_cleans_file_and_does_not_activate_document(
             )
     assert response.status_code == 500
     assert list(upload_dir.iterdir()) == []
-    conversation = database.get_or_create_conversation("web", "default-local")
-    assert conversation["active_document_id"] is None
+    assert database.get_latest_document() is None

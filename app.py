@@ -5,8 +5,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 
 from answer_generator import generate_basic_answer
 from api_models import QuestionRequest, ResetRequest
@@ -18,6 +17,7 @@ from app_settings import (
 from conversation_service import (
     DocumentSelectionConflict,
     SystemDocumentUnavailable,
+    TelegramIdentityRequired,
     get_system_document_state,
     is_system_document_configured,
     reset_conversation,
@@ -25,11 +25,13 @@ from conversation_service import (
     synchronize_system_document_conversations,
 )
 from database import (
+    ConversationIdentityMismatch,
     database_is_ready,
     get_document,
     initialize_database,
     insert_document_with_chunks,
     load_document_chunks,
+    record_unanswered_question,
 )
 from document_processor import (
     extract_text_from_pdf,
@@ -63,8 +65,6 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Admissions RAG Assistant")
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
-STATIC_DIR = Path("static")
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 initialize_database()
 synchronize_system_document_conversations()
 
@@ -85,7 +85,6 @@ def _resolve_request_document(request: QuestionRequest) -> tuple[dict, list[dict
         conversation_id=request.conversation_id,
         external_chat_id=request.external_chat_id,
         external_user_id=request.external_user_id,
-        allow_latest_document_default=not request.external_chat_id,
         requested_document_id=request.document_id,
     )
     document_id = conversation["active_document_id"]
@@ -130,6 +129,19 @@ def _build_document_chunks(
         chunk["filename"] = filename
         chunk["embedding"] = embedding
     return document_type, chunks
+
+
+def _record_legacy_unanswered(question: str) -> None:
+    try:
+        record_unanswered_question(
+            question=question,
+            standalone_question=question,
+            reason="no_relevant_chunks",
+        )
+    except Exception:
+        logger.error(
+            "Failed to record an unanswered question without logging its content."
+        )
 
 
 @app.get("/")
@@ -177,6 +189,22 @@ def document_selection_conflict_handler(_request, error):
     return JSONResponse(status_code=409, content={"detail": str(error)})
 
 
+@app.exception_handler(TelegramIdentityRequired)
+def telegram_identity_required_handler(_request, _error):
+    return JSONResponse(
+        status_code=400,
+        content={"detail": "Telegram external_chat_id is required."},
+    )
+
+
+@app.exception_handler(ConversationIdentityMismatch)
+def conversation_identity_mismatch_handler(_request, _error):
+    return JSONResponse(
+        status_code=403,
+        content={"detail": "Conversation identity does not match."},
+    )
+
+
 @app.exception_handler(SystemDocumentUnavailable)
 def system_document_unavailable_handler(_request, error):
     content = {
@@ -187,11 +215,6 @@ def system_document_unavailable_handler(_request, error):
     if error.conversation is not None:
         content["conversation_id"] = error.conversation["id"]
     return JSONResponse(status_code=503, content=content)
-
-
-@app.get("/ui")
-def user_interface():
-    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.post("/upload")
@@ -250,19 +273,14 @@ async def upload_document(
         document_type, chunks = _build_document_chunks(
             extracted_text, original_filename
         )
-        try:
+        system_document_configured = get_system_document_state().configured
+        conversation = None
+        if not system_document_configured and external_chat_id:
             conversation = resolve_conversation(
                 conversation_id=conversation_id,
                 external_chat_id=external_chat_id,
                 external_user_id=external_user_id,
-                allow_latest_document_default=False,
             )
-            system_document_configured = get_system_document_state().configured
-        except SystemDocumentUnavailable as error:
-            if error.conversation is None:
-                raise
-            conversation = error.conversation
-            system_document_configured = True
         document_id = insert_document_with_chunks(
             original_filename,
             stored_filename,
@@ -270,7 +288,7 @@ async def upload_document(
             get_embedding_model_name(),
             chunks,
             activate_conversation_id=(
-                None if system_document_configured else conversation["id"]
+                conversation["id"] if conversation is not None else None
             ),
         )
         invalidate_document_cache(document_id)
@@ -286,8 +304,10 @@ async def upload_document(
 
     return {
         "document_id": document_id,
-        "conversation_id": conversation["id"],
-        "active_document_id": conversation["active_document_id"],
+        "conversation_id": conversation["id"] if conversation else None,
+        "active_document_id": (
+            conversation["active_document_id"] if conversation else None
+        ),
         "filename": original_filename,
         "document_type": document_type,
         "size_bytes": size,
@@ -307,8 +327,11 @@ def chat(request: QuestionRequest):
             external_chat_id=request.external_chat_id,
             external_user_id=request.external_user_id,
             document_id=request.document_id,
-            allow_latest_document_default=not request.external_chat_id,
         )
+    except TelegramIdentityRequired as error:
+        raise HTTPException(400, str(error)) from error
+    except ConversationIdentityMismatch as error:
+        raise HTTPException(403, "Conversation identity does not match.") from error
     except DocumentSelectionConflict as error:
         raise HTTPException(409, str(error)) from error
     except ValueError as error:
@@ -349,7 +372,6 @@ def conversation_status(
         conversation_id=conversation_id,
         external_chat_id=external_chat_id,
         external_user_id=external_user_id,
-        allow_latest_document_default=not external_chat_id,
     )
     document = (
         get_document(conversation["active_document_id"])
@@ -368,6 +390,8 @@ def conversation_status(
 def ask_question(request: QuestionRequest):
     _, chunks = _resolve_request_document(request)
     relevant = find_relevant_chunks(request.question, chunks)
+    if not relevant:
+        _record_legacy_unanswered(request.question)
     return {
         "question": request.question,
         "answer": generate_basic_answer(request.question, relevant),
@@ -385,6 +409,8 @@ def ask_question_semantic(request: QuestionRequest):
         min_score=SEMANTIC_SCORE_THRESHOLD,
         fallback_score_threshold=SEMANTIC_FALLBACK_SCORE_THRESHOLD,
     )
+    if not relevant:
+        _record_legacy_unanswered(request.question)
     return {
         "question": request.question,
         "answer": generate_basic_answer(request.question, relevant),

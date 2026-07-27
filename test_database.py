@@ -2,6 +2,7 @@ import json
 import os
 import sqlite3
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -99,6 +100,105 @@ class DatabaseCompatibilityTests(unittest.TestCase):
                     database.get_conversation(first["id"])["active_document_id"],
                     document_id,
                 )
+
+    def test_connections_use_wal_foreign_keys_and_busy_timeout(self):
+        with TemporaryDirectory() as temporary_directory:
+            database_path = Path(temporary_directory) / "sqlite-settings.db"
+            with patch.dict(os.environ, {"DATABASE_PATH": str(database_path)}):
+                database.initialize_database()
+                with closing(database.get_connection()) as connection:
+                    journal_mode = connection.execute(
+                        "PRAGMA journal_mode"
+                    ).fetchone()[0]
+                    busy_timeout = connection.execute(
+                        "PRAGMA busy_timeout"
+                    ).fetchone()[0]
+                    foreign_keys = connection.execute(
+                        "PRAGMA foreign_keys"
+                    ).fetchone()[0]
+
+            self.assertEqual(journal_mode.casefold(), "wal")
+            self.assertEqual(busy_timeout, 30000)
+            self.assertEqual(foreign_keys, 1)
+
+    def test_concurrent_get_or_create_returns_one_conversation(self):
+        with TemporaryDirectory() as temporary_directory:
+            database_path = Path(temporary_directory) / "concurrent.db"
+            with patch.dict(os.environ, {"DATABASE_PATH": str(database_path)}):
+                database.initialize_database()
+
+                def create_conversation(_index):
+                    return database.get_or_create_conversation(
+                        "telegram",
+                        "same-chat",
+                        "same-user",
+                    )["id"]
+
+                with ThreadPoolExecutor(max_workers=8) as executor:
+                    conversation_ids = list(executor.map(create_conversation, range(24)))
+
+                with closing(database.get_connection()) as connection:
+                    count = connection.execute(
+                        "SELECT COUNT(*) FROM conversations"
+                    ).fetchone()[0]
+
+            self.assertEqual(len(set(conversation_ids)), 1)
+            self.assertEqual(count, 1)
+
+    def test_duplicate_conversation_migration_preserves_all_messages(self):
+        with TemporaryDirectory() as temporary_directory:
+            database_path = Path(temporary_directory) / "duplicates.db"
+            with patch.dict(os.environ, {"DATABASE_PATH": str(database_path)}):
+                database.initialize_database()
+                with closing(database.get_connection()) as connection, connection:
+                    connection.execute(
+                        "DROP INDEX uq_conversations_external_identity"
+                    )
+                    connection.executemany(
+                        """
+                        INSERT INTO conversations (
+                            id, channel, external_chat_id, external_user_id,
+                            active_document_id, created_at, updated_at
+                        ) VALUES (?, 'telegram', 'same-chat', NULL, NULL, ?, ?)
+                        """,
+                        [
+                            ("oldest", "2026-01-01", "2026-01-01"),
+                            ("duplicate", "2026-01-02", "2026-01-02"),
+                        ],
+                    )
+                    connection.executemany(
+                        """
+                        INSERT INTO messages (
+                            conversation_id, role, content, created_at
+                        ) VALUES (?, 'user', ?, '2026-01-03')
+                        """,
+                        [
+                            ("oldest", "first message"),
+                            ("duplicate", "second message"),
+                        ],
+                    )
+
+                database.initialize_database()
+
+                with closing(database.get_connection()) as connection:
+                    conversations = connection.execute(
+                        "SELECT id FROM conversations"
+                    ).fetchall()
+                    messages = connection.execute(
+                        """
+                        SELECT conversation_id, content
+                        FROM messages ORDER BY id
+                        """
+                    ).fetchall()
+
+            self.assertEqual([row["id"] for row in conversations], ["oldest"])
+            self.assertEqual(
+                [row["content"] for row in messages],
+                ["first message", "second message"],
+            )
+            self.assertTrue(
+                all(row["conversation_id"] == "oldest" for row in messages)
+            )
 
     @staticmethod
     def create_old_database(database_path: Path) -> None:

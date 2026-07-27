@@ -14,6 +14,10 @@ SYNTHETIC_CHUNK = {
     "text_for_retrieval": "What is the deadline?\nThe deadline is 30 April.",
     "embedding": np.array([1.0, 0.0]),
 }
+TELEGRAM_IDENTITY = {
+    "external_chat_id": "test-chat",
+    "external_user_id": "test-user",
+}
 
 
 class FakeModel:
@@ -26,11 +30,14 @@ def load_test_app(tmp_path, monkeypatch, *, with_document=True):
     monkeypatch.setenv("LLM_PROVIDER", "gemini")
     monkeypatch.setenv("GEMINI_API_KEY", "fake-gemini-key-for-tests")
     monkeypatch.setenv("GEMINI_MODEL", "fake-gemini-model")
+    monkeypatch.setenv("SYSTEM_DOCUMENT_ID", "1")
+    import app_settings
     import database
     import conversation_service
     import rag_service
     import app
 
+    importlib.reload(app_settings)
     database = importlib.reload(database)
     importlib.reload(conversation_service)
     rag_service = importlib.reload(rag_service)
@@ -61,7 +68,10 @@ def test_chat_success_has_conversation_status_timings_and_sources(
     )
 
     with TestClient(app_module.app) as client:
-        response = client.post("/chat", json={"question": "What is the deadline?"})
+        response = client.post(
+            "/chat",
+            json={"question": "What is the deadline?", **TELEGRAM_IDENTITY},
+        )
 
     assert response.status_code == 200
     body = response.json()
@@ -83,7 +93,8 @@ def test_ask_llm_backward_compatibility(tmp_path, monkeypatch):
     )
     with TestClient(app_module.app) as client:
         response = client.post(
-            "/ask-llm", json={"question": "What is the deadline?"}
+            "/ask-llm",
+            json={"question": "What is the deadline?", **TELEGRAM_IDENTITY},
         )
     assert response.status_code == 200
     assert response.json()["status"] == "success"
@@ -100,13 +111,16 @@ def test_provider_429_returns_controlled_503(tmp_path, monkeypatch):
         "llm_answer_generator.generate_gemini_answer", fail_provider
     )
     with TestClient(app_module.app) as client:
-        response = client.post("/chat", json={"question": "What is the deadline?"})
+        response = client.post(
+            "/chat",
+            json={"question": "What is the deadline?", **TELEGRAM_IDENTITY},
+        )
     assert response.status_code == 503
     assert response.json()["status"] == "provider_unavailable"
     assert response.json()["sources"] == []
 
 
-def test_no_active_document_is_controlled_for_telegram(tmp_path, monkeypatch):
+def test_missing_system_document_is_controlled_for_telegram(tmp_path, monkeypatch):
     app_module = load_test_app(tmp_path, monkeypatch, with_document=False)
     with TestClient(app_module.app) as client:
         response = client.post(
@@ -117,7 +131,7 @@ def test_no_active_document_is_controlled_for_telegram(tmp_path, monkeypatch):
                 "external_user_id": "telegram-user",
             },
         )
-    assert response.status_code == 200
+    assert response.status_code == 503
     body = response.json()
-    assert body["status"] == "insufficient_document_information"
+    assert body["status"] == "system_document_unavailable"
     assert body["sources"] == []

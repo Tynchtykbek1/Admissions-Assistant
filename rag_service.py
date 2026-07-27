@@ -11,6 +11,7 @@ from database import (
     get_document,
     get_recent_messages,
     load_document_chunks,
+    record_unanswered_question,
 )
 from embedding_retriever import find_relevant_chunks_semantic
 from llm_answer_generator import (
@@ -94,6 +95,39 @@ def safe_conversation_label(conversation_id: str) -> str:
     return hashlib.sha256(conversation_id.encode("utf-8")).hexdigest()[:12]
 
 
+def _record_unanswered_safely(
+    *,
+    question: str,
+    standalone_question: str,
+    reason: str,
+    relevant_chunks: list[dict],
+) -> None:
+    scores = [
+        float(chunk["score"])
+        for chunk in relevant_chunks
+        if chunk.get("score") is not None
+    ]
+    faq_ids = sorted(
+        {
+            int(chunk["faq_id"])
+            for chunk in relevant_chunks
+            if chunk.get("faq_id") is not None
+        }
+    )
+    try:
+        record_unanswered_question(
+            question=question,
+            standalone_question=standalone_question,
+            reason=reason,
+            max_similarity_score=max(scores) if scores else None,
+            retrieved_faq_ids=faq_ids,
+        )
+    except Exception:
+        logger.error(
+            "Failed to record an unanswered question without logging its content."
+        )
+
+
 def _base_response(
     *,
     question: str,
@@ -129,14 +163,12 @@ def answer_conversation_question(
     external_chat_id: str | None = None,
     external_user_id: str | None = None,
     document_id: int | None = None,
-    allow_latest_document_default: bool = False,
 ) -> dict:
     try:
         conversation = resolve_conversation(
             conversation_id=conversation_id,
             external_chat_id=external_chat_id,
             external_user_id=external_user_id,
-            allow_latest_document_default=allow_latest_document_default,
             requested_document_id=document_id,
         )
     except SystemDocumentUnavailable as error:
@@ -189,6 +221,12 @@ def answer_conversation_question(
     retrieval_duration_ms = (time.perf_counter() - retrieval_started_at) * 1000
 
     if not relevant_chunks:
+        _record_unanswered_safely(
+            question=question,
+            standalone_question=rewrite.standalone_question,
+            reason="no_relevant_chunks",
+            relevant_chunks=[],
+        )
         add_message(
             conversation["id"], "assistant", INSUFFICIENT_INFORMATION_ANSWER
         )
@@ -211,6 +249,13 @@ def answer_conversation_question(
             standalone_question=rewrite.standalone_question,
             history=history,
         )
+        if result.status == INSUFFICIENT_DOCUMENT_INFORMATION:
+            _record_unanswered_safely(
+                question=question,
+                standalone_question=rewrite.standalone_question,
+                reason="llm_insufficient_document_information",
+                relevant_chunks=relevant_chunks,
+            )
         sources = (
             build_sources(relevant_chunks)
             if result.status in {SUCCESS, PARTIAL_INFORMATION}

@@ -47,13 +47,29 @@ def upload_text(client: TestClient, filename: str, text: str) -> dict:
         files={"file": (filename, text.encode("utf-8"), "text/plain")}
     )
     response.raise_for_status()
-    return response.json()
+    result = response.json()
+    import app_settings
+    import conversation_service
+
+    app_settings.SYSTEM_DOCUMENT_ID = result["document_id"]
+    app_settings.SYSTEM_DOCUMENT_ID_INVALID = False
+    conversation_service.synchronize_system_document_conversations()
+    return result
 
 
-def ask_semantic(client: TestClient, question: str) -> dict:
+def ask_semantic(
+    client: TestClient,
+    question: str,
+    document_id: int,
+) -> dict:
     response = client.post(
         "/ask-semantic",
-        json={"question": question}
+        json={
+            "question": question,
+            "external_chat_id": "manual-test-chat",
+            "external_user_id": "manual-test-user",
+            "document_id": document_id,
+        },
     )
     response.raise_for_status()
     return response.json()
@@ -73,7 +89,7 @@ def run_standard_document_tests(client: TestClient) -> None:
     ]
 
     for question, expected in test_cases:
-        result = ask_semantic(client, question)
+        result = ask_semantic(client, question, upload_result["document_id"])
         assert expected.casefold() in result["answer"].casefold()
 
     print("Standard document API tests: PASS")
@@ -95,7 +111,11 @@ def run_faq_test(client: TestClient) -> None:
     assert upload_result["document_type"] == "faq"
     assert upload_result["entries_count"] == upload_result["chunks_count"]
 
-    result = ask_semantic(client, "Do I have guaranteed admission?")
+    result = ask_semantic(
+        client,
+        "Do I have guaranteed admission?",
+        upload_result["document_id"],
+    )
     answer = result["answer"].casefold()
     assert "admission is never guaranteed" in answer
     assert "is admission guaranteed?" not in answer

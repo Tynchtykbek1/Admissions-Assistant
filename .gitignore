@@ -5,3 +5,4 @@ uploads/
 .pytest_cache/
 test_files/
 admissions.db
+unanswered*.csv

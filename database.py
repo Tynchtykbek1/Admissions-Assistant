@@ -249,6 +249,15 @@ def get_latest_document() -> dict | None:
     return dict(row) if row else None
 
 
+def count_document_chunks(document_id: int) -> int:
+    with closing(get_connection()) as connection:
+        row = connection.execute(
+            "SELECT COUNT(*) AS chunk_count FROM chunks WHERE document_id = ?",
+            (document_id,),
+        ).fetchone()
+    return int(row["chunk_count"])
+
+
 def load_document_chunks(document_id: int) -> list[dict]:
     with closing(get_connection()) as connection:
         document = connection.execute(
@@ -390,6 +399,27 @@ def update_active_document(conversation_id: str, document_id: int | None) -> Non
         )
         if cursor.rowcount != 1:
             raise ValueError("Conversation not found.")
+
+
+def synchronize_conversations_active_document(document_id: int) -> int:
+    """Point every conversation at one document in a single transaction."""
+    now = _utc_now()
+    with closing(get_connection()) as connection, connection:
+        document = connection.execute(
+            "SELECT 1 FROM documents WHERE id = ?",
+            (document_id,),
+        ).fetchone()
+        if document is None:
+            raise ValueError("Document not found.")
+        cursor = connection.execute(
+            """
+            UPDATE conversations
+            SET active_document_id = ?, updated_at = ?
+            WHERE active_document_id IS NULL OR active_document_id != ?
+            """,
+            (document_id, now, document_id),
+        )
+        return cursor.rowcount
 
 
 def add_message(conversation_id: str, role: str, content: str) -> int:

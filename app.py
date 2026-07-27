@@ -15,15 +15,21 @@ from app_settings import (
     MAX_UPLOAD_SIZE_MB,
     UPLOAD_READ_CHUNK_SIZE,
 )
-from conversation_service import reset_conversation, resolve_conversation
+from conversation_service import (
+    DocumentSelectionConflict,
+    SystemDocumentUnavailable,
+    get_system_document_state,
+    is_system_document_configured,
+    reset_conversation,
+    resolve_conversation,
+    synchronize_system_document_conversations,
+)
 from database import (
     database_is_ready,
     get_document,
-    get_latest_document,
     initialize_database,
     insert_document_with_chunks,
     load_document_chunks,
-    update_active_document,
 )
 from document_processor import (
     extract_text_from_pdf,
@@ -36,6 +42,8 @@ from embedding_retriever import find_relevant_chunks_semantic
 from llm_answer_generator import PROVIDER_UNAVAILABLE
 from logging_config import configure_logging
 from rag_service import (
+    SYSTEM_DOCUMENT_UNAVAILABLE,
+    SYSTEM_DOCUMENT_UNAVAILABLE_ANSWER,
     answer_conversation_question,
     build_sources,
     invalidate_document_cache,
@@ -58,6 +66,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 STATIC_DIR = Path("static")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 initialize_database()
+synchronize_system_document_conversations()
 
 ALLOWED_EXTENSIONS = {".txt", ".pdf"}
 
@@ -77,14 +86,11 @@ def _resolve_request_document(request: QuestionRequest) -> tuple[dict, list[dict
         external_chat_id=request.external_chat_id,
         external_user_id=request.external_user_id,
         allow_latest_document_default=not request.external_chat_id,
+        requested_document_id=request.document_id,
     )
-    document_id = request.document_id or conversation["active_document_id"]
+    document_id = conversation["active_document_id"]
     if document_id is None:
         return conversation, []
-    if request.document_id is not None:
-        if get_document(document_id) is None:
-            raise HTTPException(status_code=404, detail="Document not found.")
-        update_active_document(conversation["id"], document_id)
     return conversation, load_document_chunks(document_id)
 
 
@@ -140,15 +146,47 @@ def health():
 def ready():
     database_ready = database_is_ready()
     provider_configured = _provider_configuration_ready()
-    status_code = 200 if database_ready and provider_configured else 503
+    system_document_configured = is_system_document_configured()
+    system_document_available = False
+    if database_ready:
+        system_document_available = get_system_document_state().document is not None
+    status_code = (
+        200
+        if (
+            database_ready
+            and provider_configured
+            and system_document_configured
+            and system_document_available
+        )
+        else 503
+    )
     return JSONResponse(
         status_code=status_code,
         content={
             "status": "ready" if status_code == 200 else "not_ready",
             "database": "ok" if database_ready else "unavailable",
             "provider_configured": provider_configured,
+            "system_document_configured": system_document_configured,
+            "system_document_available": system_document_available,
         },
     )
+
+
+@app.exception_handler(DocumentSelectionConflict)
+def document_selection_conflict_handler(_request, error):
+    return JSONResponse(status_code=409, content={"detail": str(error)})
+
+
+@app.exception_handler(SystemDocumentUnavailable)
+def system_document_unavailable_handler(_request, error):
+    content = {
+        "status": SYSTEM_DOCUMENT_UNAVAILABLE,
+        "answer": SYSTEM_DOCUMENT_UNAVAILABLE_ANSWER,
+        "sources": [],
+    }
+    if error.conversation is not None:
+        content["conversation_id"] = error.conversation["id"]
+    return JSONResponse(status_code=503, content=content)
 
 
 @app.get("/ui")
@@ -212,19 +250,28 @@ async def upload_document(
         document_type, chunks = _build_document_chunks(
             extracted_text, original_filename
         )
-        conversation = resolve_conversation(
-            conversation_id=conversation_id,
-            external_chat_id=external_chat_id,
-            external_user_id=external_user_id,
-            allow_latest_document_default=False,
-        )
+        try:
+            conversation = resolve_conversation(
+                conversation_id=conversation_id,
+                external_chat_id=external_chat_id,
+                external_user_id=external_user_id,
+                allow_latest_document_default=False,
+            )
+            system_document_configured = get_system_document_state().configured
+        except SystemDocumentUnavailable as error:
+            if error.conversation is None:
+                raise
+            conversation = error.conversation
+            system_document_configured = True
         document_id = insert_document_with_chunks(
             original_filename,
             stored_filename,
             document_type,
             get_embedding_model_name(),
             chunks,
-            activate_conversation_id=conversation["id"],
+            activate_conversation_id=(
+                None if system_document_configured else conversation["id"]
+            ),
         )
         invalidate_document_cache(document_id)
     except HTTPException:
@@ -240,6 +287,7 @@ async def upload_document(
     return {
         "document_id": document_id,
         "conversation_id": conversation["id"],
+        "active_document_id": conversation["active_document_id"],
         "filename": original_filename,
         "document_type": document_type,
         "size_bytes": size,
@@ -261,6 +309,8 @@ def chat(request: QuestionRequest):
             document_id=request.document_id,
             allow_latest_document_default=not request.external_chat_id,
         )
+    except DocumentSelectionConflict as error:
+        raise HTTPException(409, str(error)) from error
     except ValueError as error:
         raise HTTPException(404, str(error)) from error
     logger.info(
@@ -270,7 +320,7 @@ def chat(request: QuestionRequest):
         response["status"],
         (time.perf_counter() - request_started_at) * 1000,
     )
-    if response["status"] == PROVIDER_UNAVAILABLE:
+    if response["status"] in {PROVIDER_UNAVAILABLE, SYSTEM_DOCUMENT_UNAVAILABLE}:
         return JSONResponse(status_code=503, content=response)
     return response
 

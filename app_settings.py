@@ -14,6 +14,17 @@ def read_positive_int(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
+def read_optional_positive_int(name: str) -> int | None:
+    raw_value = os.getenv(name, "").strip()
+    if not raw_value:
+        return None
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
 def read_bool(name: str, default: bool) -> bool:
     value = os.getenv(name)
     if value is None:
@@ -27,3 +38,7 @@ MAX_UPLOAD_SIZE_MB = read_positive_int("MAX_UPLOAD_SIZE_MB", 15)
 MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 DOCUMENT_CACHE_SIZE = read_positive_int("DOCUMENT_CACHE_SIZE", 8)
 UPLOAD_READ_CHUNK_SIZE = 1024 * 1024
+SYSTEM_DOCUMENT_ID: int | None = read_optional_positive_int("SYSTEM_DOCUMENT_ID")
+SYSTEM_DOCUMENT_ID_INVALID = bool(
+    os.getenv("SYSTEM_DOCUMENT_ID", "").strip()
+) and SYSTEM_DOCUMENT_ID is None

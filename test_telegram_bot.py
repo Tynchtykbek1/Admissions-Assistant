@@ -13,11 +13,13 @@ from telegram_bot import (
     PROVIDER_UNAVAILABLE_MESSAGES,
     RESET_MESSAGES,
     START_MESSAGES,
+    SYSTEM_DOCUMENT_UNAVAILABLE_MESSAGES,
     format_backend_response,
     handle_question,
     help_command,
     reset_command,
     split_message,
+    status_command,
     stop_typing,
     start_command,
 )
@@ -101,6 +103,21 @@ class TelegramFormattingTests(unittest.TestCase):
         self.assertEqual(
             format_backend_response(result, "en"),
             "The service is temporarily unavailable. Please try again in a few minutes.",
+        )
+
+    def test_localizes_system_document_unavailable(self):
+        result = {
+            "status": "system_document_unavailable",
+            "answer": "ignored",
+            "sources": [],
+        }
+        self.assertEqual(
+            format_backend_response(result, "ru"),
+            SYSTEM_DOCUMENT_UNAVAILABLE_MESSAGES["ru"],
+        )
+        self.assertEqual(
+            format_backend_response(result, "en"),
+            SYSTEM_DOCUMENT_UNAVAILABLE_MESSAGES["en"],
         )
 
 
@@ -259,6 +276,26 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.chat_data["conversation_id"], "conversation-1")
         self.assertEqual(
             update.message.reply_text.await_args.args[0], RESET_MESSAGES["ru"]
+        )
+
+    async def test_status_shows_system_document_filename(self):
+        update = make_update("/status")
+        context = SimpleNamespace(chat_data={})
+        result = {
+            "status": "ok",
+            "conversation_id": "conversation-1",
+            "active_document_id": 1,
+            "active_document_filename": "FAQ.docx.pdf",
+        }
+        with patch(
+            "telegram_bot.backend_status",
+            new=AsyncMock(return_value=result),
+        ) as backend:
+            await status_command(update, context)
+        backend.assert_awaited_once_with("123", "456", None)
+        self.assertIn(
+            "FAQ.docx.pdf",
+            update.message.reply_text.await_args.args[0],
         )
 
     async def test_same_chat_questions_are_serialized(self):

@@ -5,13 +5,12 @@ from collections import OrderedDict
 from threading import Lock
 
 from app_settings import CHAT_HISTORY_LIMIT, DOCUMENT_CACHE_SIZE
-from conversation_service import resolve_conversation
+from conversation_service import SystemDocumentUnavailable, resolve_conversation
 from database import (
     add_message,
     get_document,
     get_recent_messages,
     load_document_chunks,
-    update_active_document,
 )
 from embedding_retriever import find_relevant_chunks_semantic
 from llm_answer_generator import (
@@ -34,6 +33,10 @@ logger = logging.getLogger(__name__)
 
 NO_ACTIVE_DOCUMENT_ANSWER = (
     "No document is active for this conversation. Upload or select a document first."
+)
+SYSTEM_DOCUMENT_UNAVAILABLE = "system_document_unavailable"
+SYSTEM_DOCUMENT_UNAVAILABLE_ANSWER = (
+    "The knowledge base is temporarily unavailable. Please try again later."
 )
 
 _document_cache: OrderedDict[int, list[dict]] = OrderedDict()
@@ -128,17 +131,30 @@ def answer_conversation_question(
     document_id: int | None = None,
     allow_latest_document_default: bool = False,
 ) -> dict:
-    conversation = resolve_conversation(
-        conversation_id=conversation_id,
-        external_chat_id=external_chat_id,
-        external_user_id=external_user_id,
-        allow_latest_document_default=allow_latest_document_default,
-    )
-    if document_id is not None:
-        if get_document(document_id) is None:
-            raise ValueError("The requested document does not exist.")
-        update_active_document(conversation["id"], document_id)
-        conversation["active_document_id"] = document_id
+    try:
+        conversation = resolve_conversation(
+            conversation_id=conversation_id,
+            external_chat_id=external_chat_id,
+            external_user_id=external_user_id,
+            allow_latest_document_default=allow_latest_document_default,
+            requested_document_id=document_id,
+        )
+    except SystemDocumentUnavailable as error:
+        conversation = error.conversation
+        if conversation is None:
+            raise
+        return _base_response(
+            question=question,
+            standalone_question=question,
+            answer=SYSTEM_DOCUMENT_UNAVAILABLE_ANSWER,
+            status=SYSTEM_DOCUMENT_UNAVAILABLE,
+            conversation_id=conversation["id"],
+            sources=[],
+            provider="unconfigured",
+            provider_duration_ms=0.0,
+            retrieval_duration_ms=0.0,
+            document=None,
+        )
 
     history = get_recent_messages(conversation["id"], CHAT_HISTORY_LIMIT)
     add_message(conversation["id"], "user", question)

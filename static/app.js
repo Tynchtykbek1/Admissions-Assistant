@@ -15,7 +15,6 @@ const sourcesElement = document.querySelector("#sources");
 
 let documentUploaded = false;
 let conversationId = localStorage.getItem("admissionsConversationId");
-let activeDocumentId = null;
 
 function showError(element, message) {
     element.textContent = message;
@@ -32,6 +31,27 @@ async function readError(response) {
         return data.detail || "The request failed.";
     } catch {
         return "The request failed.";
+    }
+}
+
+async function loadConversationStatus() {
+    const query = conversationId
+        ? `?conversation_id=${encodeURIComponent(conversationId)}`
+        : "";
+    const response = await fetch(`/conversation/status${query}`);
+    if (!response.ok) {
+        return;
+    }
+    const result = await response.json();
+    conversationId = result.conversation_id;
+    localStorage.setItem("admissionsConversationId", conversationId);
+    documentUploaded = Boolean(result.active_document_id);
+    if (result.active_document_filename) {
+        currentFilename.textContent = result.active_document_filename;
+        currentDocumentType.textContent = "System knowledge document";
+        currentChunks.textContent = "Managed by the administrator";
+        currentDocument.hidden = false;
+        uploadStatus.textContent = "The system knowledge document is ready.";
     }
 }
 
@@ -64,9 +84,7 @@ uploadButton.addEventListener("click", async () => {
         }
 
         const result = await response.json();
-        documentUploaded = true;
         conversationId = result.conversation_id;
-        activeDocumentId = result.document_id;
         localStorage.setItem("admissionsConversationId", conversationId);
         const typeLabel = result.document_type === "faq" ? "FAQ" : "Standard";
         const itemCount = result.entries_count ?? result.chunks_count;
@@ -75,6 +93,7 @@ uploadButton.addEventListener("click", async () => {
         currentDocumentType.textContent = typeLabel;
         currentChunks.textContent = itemCount;
         currentDocument.hidden = false;
+        await loadConversationStatus();
     } catch (error) {
         showError(uploadStatus, error.message);
     } finally {
@@ -106,8 +125,7 @@ askButton.addEventListener("click", async () => {
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({
                 question,
-                conversation_id: conversationId,
-                document_id: activeDocumentId
+                conversation_id: conversationId
             })
         });
 
@@ -149,3 +167,5 @@ askButton.addEventListener("click", async () => {
         askButton.disabled = false;
     }
 });
+
+loadConversationStatus();

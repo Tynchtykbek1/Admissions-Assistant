@@ -117,6 +117,11 @@ PROVIDER_UNAVAILABLE_MESSAGES = {
     "en": "The service is temporarily unavailable. Please try again in a few minutes.",
 }
 
+SYSTEM_DOCUMENT_UNAVAILABLE_MESSAGES = {
+    "ru": "База знаний временно недоступна. Пожалуйста, попробуйте позже.",
+    "en": "The knowledge base is temporarily unavailable. Please try again later.",
+}
+
 RESET_MESSAGES = {
     "ru": "История диалога очищена. Активный документ сохранён.",
     "en": "Conversation history cleared. The active document was kept.",
@@ -168,7 +173,10 @@ async def ask_backend(
         response = await client.post(f"{BACKEND_URL}/chat", json=payload)
         if response.status_code == 503:
             result = response.json()
-            if isinstance(result, dict) and result.get("status") == "provider_unavailable":
+            if isinstance(result, dict) and result.get("status") in {
+                "provider_unavailable",
+                "system_document_unavailable",
+            }:
                 return result
         response.raise_for_status()
         return response.json()
@@ -205,6 +213,13 @@ async def backend_status(
         response = await client.get(
             f"{BACKEND_URL}/conversation/status", params=params
         )
+        if response.status_code == 503:
+            result = response.json()
+            if (
+                isinstance(result, dict)
+                and result.get("status") == "system_document_unavailable"
+            ):
+                return result
         response.raise_for_status()
         return response.json()
 
@@ -260,6 +275,8 @@ def format_backend_response(result: dict, language: str = "en") -> str:
     status = result.get("status")
     if status == "provider_unavailable":
         return PROVIDER_UNAVAILABLE_MESSAGES[language]
+    if status == "system_document_unavailable":
+        return SYSTEM_DOCUMENT_UNAVAILABLE_MESSAGES[language]
     if status == "insufficient_document_information":
         return NO_INFORMATION_MESSAGES[language]
     if status not in {None, "success", "partial_information"}:
@@ -375,6 +392,12 @@ async def reset_command(
                 chat_id, user_id, _stored_conversation_id(context)
             )
         _remember_conversation_id(context, result)
+        if result.get("status") == "system_document_unavailable":
+            await send_html(
+                update.message,
+                SYSTEM_DOCUMENT_UNAVAILABLE_MESSAGES[language],
+            )
+            return
         await send_html(update.message, RESET_MESSAGES[language])
     except (httpx.HTTPError, ValueError, TypeError):
         await send_html(update.message, ERROR_MESSAGES[language])
@@ -392,6 +415,12 @@ async def status_command(
             chat_id, user_id, _stored_conversation_id(context)
         )
         _remember_conversation_id(context, result)
+        if result.get("status") == "system_document_unavailable":
+            await send_html(
+                update.message,
+                SYSTEM_DOCUMENT_UNAVAILABLE_MESSAGES[language],
+            )
+            return
         filename = result.get("active_document_filename")
         if filename:
             prefix = "Backend доступен. Активный документ" if language == "ru" else (

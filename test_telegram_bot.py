@@ -305,6 +305,44 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.025)
         self.assertEqual(update.effective_chat.send_action.await_count, calls_after_failure)
 
+    async def test_typing_stops_for_timeout_connection_and_http_errors(self):
+        import httpx
+
+        request = httpx.Request("POST", "http://backend/chat")
+        errors = (
+            httpx.ReadTimeout("timeout", request=request),
+            httpx.ConnectError("connection", request=request),
+            httpx.HTTPStatusError(
+                "status",
+                request=request,
+                response=httpx.Response(500, request=request),
+            ),
+        )
+        for error in errors:
+            update = make_update("What documents?")
+
+            async def failing_backend(*_args):
+                await asyncio.sleep(0.015)
+                raise error
+
+            with (
+                patch("telegram_bot.TYPING_INTERVAL_SECONDS", 0.005),
+                patch("telegram_bot.ask_backend", side_effect=failing_backend),
+            ):
+                await handle_question(update, SimpleNamespace())
+
+            calls_after_failure = update.effective_chat.send_action.await_count
+            self.assertGreaterEqual(calls_after_failure, 1)
+            await asyncio.sleep(0.015)
+            self.assertEqual(
+                update.effective_chat.send_action.await_count,
+                calls_after_failure,
+            )
+            self.assertEqual(
+                update.message.reply_text.await_args.args[0],
+                ERROR_MESSAGES["en"],
+            )
+
     async def test_stop_typing_handles_task_cancellation_cleanly(self):
         task = asyncio.create_task(asyncio.sleep(10))
         await stop_typing(task)

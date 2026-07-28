@@ -3,6 +3,7 @@ import html
 import logging
 import os
 import re
+import time
 from weakref import WeakValueDictionary
 
 import httpx
@@ -12,6 +13,7 @@ from telegram.constants import ChatAction, ParseMode
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from logging_config import configure_logging
 from local_responses import resolve_local_response
+from telegram_settings import BACKEND_TIMEOUT
 
 
 load_dotenv()
@@ -174,17 +176,22 @@ async def ask_backend(
     }
     if conversation_id:
         payload["conversation_id"] = conversation_id
-    async with httpx.AsyncClient(timeout=45.0) as client:
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         response = await client.post(f"{BACKEND_URL}/chat", json=payload)
         if response.status_code == 503:
             result = response.json()
-            if isinstance(result, dict) and result.get("status") in {
+            if not isinstance(result, dict):
+                raise ValueError("The backend returned an invalid response.")
+            if result.get("status") in {
                 "provider_unavailable",
                 "system_document_unavailable",
             }:
                 return result
         response.raise_for_status()
-        return response.json()
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError("The backend returned an invalid response.")
+        return result
 
 
 async def reset_backend(
@@ -483,6 +490,7 @@ async def handle_question(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     async with _chat_lock(update):
+        backend_started_at = time.perf_counter()
         typing_task = (
             asyncio.create_task(keep_typing(update.effective_chat))
             if update.effective_chat
@@ -505,10 +513,21 @@ async def handle_question(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             final_text = format_backend_response(result, language)
             for part in split_message(final_text):
                 await send_html(update.message, part)
-        except (httpx.HTTPError, ValueError, TypeError) as error:
+        except Exception as error:
+            if isinstance(error, httpx.ReadTimeout):
+                error_category = "read_timeout"
+            elif isinstance(error, (httpx.ConnectError, httpx.ConnectTimeout)):
+                error_category = "connection_failure"
+            elif isinstance(error, httpx.HTTPStatusError):
+                error_category = "http_status_failure"
+            elif isinstance(error, (ValueError, TypeError)):
+                error_category = "invalid_backend_response"
+            else:
+                error_category = "unexpected_failure"
             logger.warning(
-                "Could not get an answer from the FastAPI backend category=%s.",
-                type(error).__name__,
+                "Backend request failed endpoint=chat category=%s elapsed_ms=%d.",
+                error_category,
+                round((time.perf_counter() - backend_started_at) * 1000),
             )
             await send_html(update.message, ERROR_MESSAGES[language])
 

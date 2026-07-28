@@ -2,6 +2,7 @@ import logging
 import os
 import time
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -62,7 +63,25 @@ from retrieval_settings import (
 configure_logging()
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Admissions RAG Assistant")
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    if not application.state.embedding_ready:
+        try:
+            model = get_embedding_model()
+            model.encode(["embedding warmup"], normalize_embeddings=True)
+            application.state.embedding_ready = True
+            logger.info("Embedding model warmup completed.")
+        except Exception as error:
+            logger.error(
+                "Embedding model warmup failed category=%s.",
+                type(error).__name__,
+            )
+    yield
+
+
+app = FastAPI(title="Admissions RAG Assistant", lifespan=lifespan)
+app.state.embedding_ready = False
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 initialize_database()
@@ -157,6 +176,7 @@ def health():
 @app.get("/ready")
 def ready():
     database_ready = database_is_ready()
+    embedding_ready = app.state.embedding_ready
     provider_configured = _provider_configuration_ready()
     system_document_configured = is_system_document_configured()
     system_document_available = False
@@ -166,6 +186,7 @@ def ready():
         200
         if (
             database_ready
+            and embedding_ready
             and provider_configured
             and system_document_configured
             and system_document_available
@@ -177,6 +198,7 @@ def ready():
         content={
             "status": "ready" if status_code == 200 else "not_ready",
             "database": "ok" if database_ready else "unavailable",
+            "embedding": "ok" if embedding_ready else "unavailable",
             "provider_configured": provider_configured,
             "system_document_configured": system_document_configured,
             "system_document_available": system_document_available,

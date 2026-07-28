@@ -227,6 +227,7 @@ def test_ready_requires_available_system_document_with_chunks(
     assert ready.json() == {
         "status": "ready",
         "database": "ok",
+        "embedding": "ok",
         "provider_configured": True,
         "system_document_configured": True,
         "system_document_available": True,

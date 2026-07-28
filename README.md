@@ -205,12 +205,24 @@ Copy `.env.example` to `.env` and set credentials. Never commit `.env`.
 | `SEMANTIC_FALLBACK_SAFE_MINIMUM` | `0.15` | Lower bound for fallback threshold |
 | `MAX_UPLOAD_SIZE_MB` | `15` | Upload limit |
 | `DOCUMENT_CACHE_SIZE` | `8` | Bounded document chunk cache |
+| `BACKEND_CONNECT_TIMEOUT_SECONDS` | `10` | Telegram-to-backend connection timeout |
+| `BACKEND_READ_TIMEOUT_SECONDS` | `90` | Telegram wait for the backend response body |
+| `BACKEND_WRITE_TIMEOUT_SECONDS` | `15` | Telegram request-body write timeout |
+| `BACKEND_POOL_TIMEOUT_SECONDS` | `10` | Telegram connection-pool timeout |
 | `LOG_LEVEL` | `INFO` | Application log level |
 | `DATABASE_PATH` | `admissions.db` | SQLite path |
 | `EMBEDDING_MODEL_NAME` | multilingual MiniLM | Embedding model |
 
 The application does not log API keys, Telegram tokens, full histories, complete
 documents, authorization headers, or full LLM prompts.
+
+Provider responses may occasionally take longer than 45 seconds, so Telegram waits
+up to 90 seconds for the backend response body by default. This is an upper bound,
+not the expected duration of every request. The existing embedding model is loaded
+and given one small local warmup encode during backend startup; no LLM provider is
+called. `/ready` succeeds only after that initialization completes successfully,
+while `/health` continues to report process availability. This hotfix does not
+change the embedding model or retrieval threshold.
 
 ## Docker Compose
 

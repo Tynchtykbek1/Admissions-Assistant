@@ -149,6 +149,21 @@ Questions from the same Telegram chat are serialized so replies cannot overtake 
 another. Different chats are processed concurrently. Backend/provider text is
 escaped before Telegram HTML rendering.
 
+### Local Telegram responses
+
+The Telegram bot answers a narrow, explicit set of common questions about its
+identity and capabilities without using the backend RAG pipeline. Questions about
+human admissions help also return these manager contacts locally:
+
+- Адахан — @TheLuckiestPersonEver
+- Максат — @maksatuniguide
+
+An explicit list of obvious unrelated requests, such as weather or joke questions,
+receives a local reminder that the bot covers admissions. This is deliberately
+conservative matching, not a general topic classifier. These local messages do not
+use RAG, call the LLM provider, or get stored as unanswered questions. Normal
+admissions questions continue through the backend RAG pipeline.
+
 ## Unanswered-question review
 
 The backend records a question for later review when retrieval finds no accepted

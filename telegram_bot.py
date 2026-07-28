@@ -11,6 +11,7 @@ from telegram import Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from logging_config import configure_logging
+from local_responses import resolve_local_response
 
 
 load_dotenv()
@@ -79,8 +80,10 @@ HELP_MESSAGES = {
         "• Нужно ли апостилировать документы?\n\n"
         "Можно задавать уточняющие вопросы: бот учитывает недавний контекст диалога.\n"
         "Используйте /reset, чтобы очистить историю текущего диалога.\n\n"
-        "Ответы основаны на загруженных документах о поступлении. Если информации "
-        "недостаточно, пожалуйста, обратитесь к менеджеру."
+        "Ответы основаны на загруженных документах о поступлении.\n\n"
+        "Если нужного ответа нет, вы можете написать менеджерам:\n\n"
+        "• Адахан — @TheLuckiestPersonEver\n"
+        "• Максат — @maksatuniguide"
     ),
     "en": (
         "I can help with admissions, required documents, application deadlines, "
@@ -91,8 +94,10 @@ HELP_MESSAGES = {
         "• Do my documents need an apostille?\n\n"
         "Follow-up questions are supported using recent conversation context.\n"
         "Use /reset to clear the current conversation history.\n\n"
-        "Answers are based on the uploaded admissions documents. If there is not "
-        "enough information, please contact a human manager."
+        "Answers are based on the uploaded admissions documents.\n\n"
+        "If the answer is not available, you can contact the managers:\n\n"
+        "• Adakhan — @TheLuckiestPersonEver\n"
+        "• Maksat — @maksatuniguide"
     ),
 }
 
@@ -472,6 +477,11 @@ async def handle_question(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     language = detect_text_language(question)
+    local_response = resolve_local_response(question, language)
+    if local_response is not None:
+        await send_html(update.message, local_response)
+        return
+
     async with _chat_lock(update):
         typing_task = (
             asyncio.create_task(keep_typing(update.effective_chat))

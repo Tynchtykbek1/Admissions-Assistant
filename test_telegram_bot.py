@@ -23,6 +23,7 @@ from telegram_bot import (
     stop_typing,
     start_command,
 )
+from local_responses import LOCAL_RESPONSES
 
 
 def make_update(text="question", language_code="ru", chat_id=123, user_id=456):
@@ -155,6 +156,59 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
                 FAREWELL_MESSAGES[language],
             )
 
+    async def test_local_intents_bypass_every_backend_path_and_typing(self):
+        cases = (
+            ("Кто ты?", "ru", "identity"),
+            ("What can you do?", "en", "capabilities"),
+            ("Как связаться с менеджером?", "ru", "manager"),
+            ("Tell me a joke", "en", "out_of_scope"),
+        )
+        for text, language, intent in cases:
+            update = make_update(text)
+            context = SimpleNamespace(chat_data={"conversation_id": "existing"})
+            with (
+                patch("telegram_bot.ask_backend", new=AsyncMock()) as ask,
+                patch("telegram_bot.reset_backend", new=AsyncMock()) as reset,
+                patch("telegram_bot.backend_status", new=AsyncMock()) as status,
+                patch("telegram_bot.keep_typing", new=AsyncMock()) as typing,
+            ):
+                await handle_question(update, context)
+
+            ask.assert_not_awaited()
+            reset.assert_not_awaited()
+            status.assert_not_awaited()
+            typing.assert_not_awaited()
+            update.effective_chat.send_action.assert_not_awaited()
+            self.assertEqual(context.chat_data, {"conversation_id": "existing"})
+            update.message.reply_text.assert_awaited_once_with(
+                LOCAL_RESPONSES[intent][language],
+                parse_mode=ParseMode.HTML,
+            )
+
+    async def test_manager_contacts_are_exact_and_safe_for_html_mode(self):
+        for text, language, names in (
+            ("Кто твой менеджер?", "ru", ("Адахан", "Максат")),
+            ("Who is your manager?", "en", ("Adakhan", "Maksat")),
+        ):
+            update = make_update(text)
+            await handle_question(update, SimpleNamespace(chat_data={}))
+            sent = update.message.reply_text.await_args
+            self.assertEqual(sent.kwargs["parse_mode"], ParseMode.HTML)
+            self.assertIn("@TheLuckiestPersonEver", sent.args[0])
+            self.assertIn("@maksatuniguide", sent.args[0])
+            self.assertTrue(all(name in sent.args[0] for name in names))
+            self.assertNotIn("<", sent.args[0])
+            self.assertNotIn(">", sent.args[0])
+
+    async def test_local_message_cannot_reach_unanswered_recording_path(self):
+        update = make_update("Какая сегодня погода?")
+        with patch(
+            "telegram_bot.ask_backend",
+            new=AsyncMock(side_effect=AssertionError("backend records unanswered")),
+        ) as backend:
+            await handle_question(update, SimpleNamespace(chat_data={}))
+        backend.assert_not_awaited()
+
     async def test_longer_question_containing_thanks_calls_backend(self):
         update = make_update("Спасибо, какие документы нужны для визы?")
         backend_result = {
@@ -176,6 +230,24 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
             await handle_question(update, SimpleNamespace())
         backend.assert_awaited_once_with(update.message.text, "123", "456", None)
         update.effective_chat.send_action.assert_awaited_with(action=ChatAction.TYPING)
+
+    async def test_normal_admissions_question_calls_backend_exactly_once(self):
+        update = make_update("Какие документы нужны для поступления?")
+        context = SimpleNamespace(chat_data={"conversation_id": "existing"})
+        result = {
+            "status": "success",
+            "answer": "Нужен паспорт.",
+            "sources": [],
+            "conversation_id": "updated",
+        }
+        with patch(
+            "telegram_bot.ask_backend", new=AsyncMock(return_value=result)
+        ) as backend:
+            await handle_question(update, context)
+        backend.assert_awaited_once_with(
+            update.message.text, "123", "456", "existing"
+        )
+        self.assertEqual(context.chat_data["conversation_id"], "updated")
 
     async def test_russian_and_english_backend_fallbacks(self):
         backend_result = {
@@ -353,6 +425,9 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
             help_update.message.reply_text.assert_awaited_once_with(
                 HELP_MESSAGES[language], parse_mode=ParseMode.HTML
             )
+            help_text = help_update.message.reply_text.await_args.args[0]
+            self.assertIn("@TheLuckiestPersonEver", help_text)
+            self.assertIn("@maksatuniguide", help_text)
 
 
 if __name__ == "__main__":

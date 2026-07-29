@@ -183,7 +183,7 @@ def test_two_conversations_use_shared_system_document(
     assert second_response["document_id"] == first_document
 
 
-def test_answer_uses_bounded_canonical_history_without_current_duplicate(
+def test_answer_provider_receives_no_raw_history(
     isolated_database,
 ):
     document_id = add_document("history.txt", "Supported fact.")
@@ -205,7 +205,7 @@ def test_answer_uses_bounded_canonical_history_without_current_duplicate(
     }]
 
     def capture(_question, _chunks, **kwargs):
-        captured_history.extend(kwargs["history"])
+        captured_history.append(kwargs["history"])
         return success_result("Supported fact.")
 
     with (
@@ -218,6 +218,4 @@ def test_answer_uses_bounded_canonical_history_without_current_duplicate(
             external_chat_id="history",
             external_user_id="history-user",
         )
-    assert len(captured_history) == rag_service.CHAT_HISTORY_LIMIT
-    assert captured_history[0]["content"] == "previous-2"
-    assert all(item["content"] != "current-message" for item in captured_history)
+    assert captured_history == [None]

@@ -29,8 +29,8 @@ PROVIDER_UNAVAILABLE_ANSWER = (
 
 RAG_INSTRUCTIONS = """
 Answer only from the retrieved document context.
-Conversation history is only for resolving what the user means; previous assistant
-answers are not authoritative factual sources. Never invent university names,
+The final standalone question already resolves any conversational references.
+Use no previous dialogue as a factual source. Never invent university names,
 admission requirements, deadlines, visa rules, documents, costs, scholarships,
 contacts, procedures, or legal information.
 
@@ -181,14 +181,6 @@ def build_context(relevant_chunks: list[dict]) -> str:
     return "\n\n".join(context_parts)
 
 
-def _format_history(history: list[dict] | None) -> str:
-    if not history:
-        return "(none)"
-    return "\n".join(
-        f"{message['role'].title()}: {message['content']}" for message in history
-    )
-
-
 def generate_openai_answer(
     question: str,
     context: str,
@@ -221,11 +213,9 @@ def _build_answer_input(
     history: list[dict] | None,
     context: str,
 ) -> str:
+    final_question = standalone_question or question
     return (
-        f"Recent conversation history (reference resolution only):\n"
-        f"{_format_history(history)}\n\n"
-        f"Current user question:\n{question}\n\n"
-        f"Standalone retrieval question:\n{standalone_question or question}\n\n"
+        f"Final standalone question:\n{final_question}\n\n"
         f"Retrieved document context:\n{context}"
     )
 

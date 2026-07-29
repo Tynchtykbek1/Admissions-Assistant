@@ -26,10 +26,12 @@ FastAPI /chat
         +--> persisted assistant turn + safe sources
 ```
 
-Conversation history helps interpret references such as “А раньше можно?” or
-“А кому написать?”. Factual answers still come only from retrieved content in the
-shared system document. Previous assistant messages are not treated as
-authoritative factual sources.
+Conversation history helps interpret genuine references such as “А раньше можно?”
+or “Какие именно?”. Clear admissions questions remain standalone even when they
+start with “А”, “И”, “And”, or “What about”. Only the latest useful user/assistant
+pair is supplied to the optional rewrite provider. The rewritten standalone
+question and accepted document context—not the raw transcript—are supplied to the
+final factual provider. Previous assistant messages are never factual sources.
 
 ## Conversation memory
 
@@ -37,6 +39,11 @@ authoritative factual sources.
 stores the current user message, optionally rewrites contextual follow-ups into a
 standalone retrieval question, retrieves from the active document, generates a
 validated answer, and stores the assistant response.
+
+Follow-up detection is deterministic and requires history plus unresolved context
+or a short connector-and-qualifier form. Clear subjects such as deadlines,
+documents, visa, IELTS, scholarships, tuition, and their English equivalents are
+standalone. Short length or a leading connector alone is insufficient.
 
 Rewriting is skipped for standalone questions. If rewriting fails, times out, or
 returns an invalid result, retrieval safely uses the original question. The current

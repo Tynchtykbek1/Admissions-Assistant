@@ -246,10 +246,10 @@ def answer_conversation_question(
         )
     else:
         result = generate_llm_answer(
-            question,
+            rewrite.standalone_question,
             relevant_chunks,
             standalone_question=rewrite.standalone_question,
-            history=history,
+            history=None,
         )
         if result.status == INSUFFICIENT_DOCUMENT_INFORMATION:
             _record_unanswered_safely(

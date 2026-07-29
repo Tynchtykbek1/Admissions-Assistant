@@ -29,6 +29,37 @@ def test_english_question_with_russian_context_requires_english():
     assert "English. Answer in English." in prompt
 
 
+@pytest.mark.parametrize("question", [
+    "Sapienza дедлайн?",
+    "Bocconi сроки?",
+    "Politecnico документы?",
+    "University of Messina поступление?",
+    "DSU стипендия есть?",
+    "IELTS нужен?",
+    "Нужен ли TOEFL?",
+    "Виза для Sapienza нужна?",
+    "Какие документы нужны для Master in Economics?",
+    "Когда подача в La Sapienza?",
+])
+def test_mixed_russian_questions_require_russian(question):
+    prompt = _build_answer_input(question, question, None, "English context")
+    assert "Russian. Answer in Russian." in prompt
+    assert "English. Answer in English." not in prompt
+
+
+@pytest.mark.parametrize("question", [
+    "What documents are required?",
+    "What is the application deadline for Sapienza?",
+    "Is IELTS required?",
+    "Are DSU scholarships available?",
+    "What documents are required for the University of Messina?",
+])
+def test_english_only_questions_remain_english(question):
+    prompt = _build_answer_input(question, question, None, "Контекст на русском")
+    assert "English. Answer in English." in prompt
+    assert "Russian. Answer in Russian." not in prompt
+
+
 def test_russian_question_with_english_context_requires_russian():
     prompt = _build_answer_input(
         "Какие документы нужны для студенческой визы?",
@@ -51,6 +82,22 @@ def test_rewritten_follow_up_language_uses_standalone_question(
 ):
     prompt = _build_answer_input(original, standalone, None, "Context")
     assert expected in prompt
+
+
+def test_russian_rewritten_follow_up_with_latin_name_requires_russian():
+    prompt = _build_answer_input(
+        "А там?",
+        "Какие документы нужны для University of Messina?",
+        None,
+        "Context",
+    )
+    assert "Russian. Answer in Russian." in prompt
+
+
+@pytest.mark.parametrize("question", ["", "?! … 123"])
+def test_non_letter_question_uses_neutral_language_fallback(question):
+    prompt = _build_answer_input(question, question, None, "Context")
+    assert "Use the same language as the final standalone question." in prompt
 
 
 def test_provider_instructions_make_language_source_explicit():

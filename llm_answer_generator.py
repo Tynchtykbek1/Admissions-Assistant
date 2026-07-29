@@ -228,11 +228,9 @@ def _build_answer_input(
 
 
 def _answer_language_instruction(question: str) -> str:
-    cyrillic_count = len(re.findall(r"[А-Яа-яЁё]", question))
-    latin_count = len(re.findall(r"[A-Za-z]", question))
-    if cyrillic_count and cyrillic_count >= latin_count:
+    if re.search(r"[А-Яа-яЁё]", question):
         return "Russian. Answer in Russian."
-    if latin_count > cyrillic_count:
+    if re.search(r"[A-Za-z]", question):
         return "English. Answer in English."
     return "Use the same language as the final standalone question."
 

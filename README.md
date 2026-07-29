@@ -193,6 +193,52 @@ python scripts/export_unanswered_questions.py --status open --output unanswered-
 ```
 
 The exporter reads `DATABASE_PATH`, writes UTF-8 CSV, and never modifies records.
+Raw mode retains its existing columns and UTF-8 compatibility. Clean mode groups
+case, whitespace, and punctuation-only variants without merging questions merely
+because they share keywords. It sums occurrence counts, keeps the earliest and
+latest timestamps, maximum retrieval score, unions FAQ IDs and reasons, and selects
+a readable representative deterministically.
+
+Clean CSV uses a Windows Excel-friendly UTF-8 BOM and contains only:
+`question`, `language`, `times_asked`, `first_seen`, `last_seen`,
+`best_retrieval_score`, `related_faq_ids`, `reason`, and `status`. Exact local
+greetings, farewells/thanks, bot identity/capability/manager questions,
+conservative out-of-scope phrases, commands, URLs, punctuation/emoji-only input,
+and known technical errors are excluded. Meaningful one-word admissions questions
+remain. Filters are applied after grouping:
+
+```shell
+python scripts/export_unanswered_questions.py --status open --clean \
+  --min-count 1 --language ru --since 2026-01-01 \
+  --sort most-frequent --output unanswered_questions_clean.csv
+```
+
+`--sort most-frequent` (the default) orders by total count, newest occurrence, then
+normalized question. `newest` and `oldest` order by the corresponding group
+timestamp. Without `--status`, raw and clean modes retain the existing default of
+open and reviewed records.
+
+On the production VM, create and copy an open clean export with:
+
+```shell
+cd /home/tyncha_leo/Admissions-Assistant
+
+docker compose exec -T backend \
+python scripts/export_unanswered_questions.py \
+  --status open \
+  --clean \
+  --sort most-frequent \
+  --output /tmp/unanswered_questions_clean.csv
+
+docker compose cp \
+backend:/tmp/unanswered_questions_clean.csv \
+unanswered_questions_clean.csv
+
+ls -lh unanswered_questions_clean.csv
+```
+
+Download the resulting file through the normal SSH/SFTP client. No public download
+endpoint is provided.
 
 ## Configuration
 
@@ -355,4 +401,5 @@ docker build -t admissions-rag-assistant:local .
 - Telegram does not upload or select documents. An administrator manages the
   shared document through the upload API and `SYSTEM_DOCUMENT_ID`.
 - A protected document/statistics/review administration panel is not implemented.
+- The manager panel is not part of this branch.
 - The first embedding operation may download the configured model and take longer.

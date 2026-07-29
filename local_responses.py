@@ -1,5 +1,13 @@
 import re
 
+GREETINGS = {
+    "ru": {"привет", "здравствуйте", "добрый день", "доброе утро", "добрый вечер", "салам"},
+    "en": {"hi", "hello", "hey", "good morning", "good afternoon", "good evening"},
+}
+FAREWELLS = {
+    "ru": {"пока", "до свидания", "спасибо", "спасибо пока"},
+    "en": {"bye", "goodbye", "thanks", "thank you"},
+}
 
 LOCAL_RESPONSES = {
     "identity": {
@@ -135,6 +143,40 @@ def normalize_local_text(text: str) -> str:
     return " ".join(without_punctuation.split())
 
 
+def greeting_language(text: str) -> str | None:
+    normalized = normalize_local_text(text)
+    if not normalized or len(normalized.split()) > 3:
+        return None
+    return next(
+        (language for language, phrases in GREETINGS.items() if normalized in phrases),
+        None,
+    )
+
+
+def farewell_language(text: str) -> str | None:
+    normalized = normalize_local_text(text)
+    if not normalized or len(normalized.split()) > 3:
+        return None
+    return next(
+        (language for language, phrases in FAREWELLS.items() if normalized in phrases),
+        None,
+    )
+
+
+def local_intent(text: str, language: str) -> str | None:
+    normalized = normalize_local_text(text)
+    if not normalized or language not in {"ru", "en"}:
+        return None
+    return next(
+        (
+            intent
+            for intent in ("identity", "capabilities", "manager", "out_of_scope")
+            if normalized in _NORMALIZED_INTENT_PHRASES[intent][language]
+        ),
+        None,
+    )
+
+
 _NORMALIZED_INTENT_PHRASES = {
     intent: {
         language: frozenset(normalize_local_text(phrase) for phrase in phrases)
@@ -151,7 +193,5 @@ def resolve_local_response(text: str, language: str) -> str | None:
     normalized = normalize_local_text(text)
     if not normalized:
         return None
-    for intent in ("identity", "capabilities", "manager", "out_of_scope"):
-        if normalized in _NORMALIZED_INTENT_PHRASES[intent][language]:
-            return LOCAL_RESPONSES[intent][language]
-    return None
+    intent = local_intent(text, language)
+    return LOCAL_RESPONSES[intent][language] if intent else None

@@ -12,7 +12,7 @@ from telegram import Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from logging_config import configure_logging
-from local_responses import resolve_local_response
+from local_responses import farewell_language, greeting_language, resolve_local_response
 from telegram_settings import BACKEND_TIMEOUT
 
 
@@ -21,16 +21,6 @@ load_dotenv()
 BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
 MAX_MESSAGE_LENGTH = 4000
 TYPING_INTERVAL_SECONDS = 4.0
-
-GREETINGS = {
-    "ru": {
-        "привет", "здравствуйте", "добрый день", "доброе утро",
-        "добрый вечер", "салам",
-    },
-    "en": {
-        "hi", "hello", "hey", "good morning", "good afternoon", "good evening",
-    },
-}
 
 GREETING_MESSAGES = {
     "ru": (
@@ -41,11 +31,6 @@ GREETING_MESSAGES = {
         "Hello! I can help you find information about admissions, documents, "
         "application deadlines, visas, and related topics. Send me your question."
     ),
-}
-
-FAREWELLS = {
-    "ru": {"пока", "до свидания", "спасибо", "спасибо пока"},
-    "en": {"bye", "goodbye", "thanks", "thank you"},
 }
 
 FAREWELL_MESSAGES = {
@@ -244,31 +229,6 @@ def detect_text_language(text: str) -> str:
     cyrillic_count = len(re.findall(r"[А-Яа-яЁё]", text))
     latin_count = len(re.findall(r"[A-Za-z]", text))
     return "ru" if cyrillic_count >= latin_count else "en"
-
-
-def normalize_greeting(text: str) -> str:
-    normalized = re.sub(r"[^\w\s]", " ", text.casefold(), flags=re.UNICODE)
-    return " ".join(normalized.split())
-
-
-def greeting_language(text: str) -> str | None:
-    normalized = normalize_greeting(text)
-    if not normalized or len(normalized.split()) > 3:
-        return None
-    for language, greetings in GREETINGS.items():
-        if normalized in greetings:
-            return language
-    return None
-
-
-def farewell_language(text: str) -> str | None:
-    normalized = normalize_greeting(text)
-    if not normalized or len(normalized.split()) > 3:
-        return None
-    for language, farewells in FAREWELLS.items():
-        if normalized in farewells:
-            return language
-    return None
 
 
 def sanitize_for_html(text: str) -> str:

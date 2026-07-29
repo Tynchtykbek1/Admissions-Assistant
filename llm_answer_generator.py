@@ -44,7 +44,13 @@ part, but not all, of the requested answer; provide every supported relevant fac
 clearly state what is missing. Use insufficient_document_information when no
 retrieved fact directly answers the central request. Facts from the same general
 admissions topic are not enough. Do not append adjacent unrelated information.
-Answer in the language of the current user question. Keep the response concise and
+Answer in the same language as the final standalone question. Determine the answer
+language only from that question, never from retrieved context, filenames,
+conversation history, or previous assistant messages. A mainly English question
+requires an English answer even when the context is Russian. A mainly Russian
+question requires a Russian answer even when the context is English. Preserve
+proper names, Telegram usernames, document names, and necessary official terms
+unchanged. Do not translate, alter, or add facts. Keep the response concise and
 Telegram-friendly, with short bullets where useful. Do not add a Sources section.
 Do not include Markdown fences or text outside the JSON object.
 """.strip()
@@ -216,8 +222,19 @@ def _build_answer_input(
     final_question = standalone_question or question
     return (
         f"Final standalone question:\n{final_question}\n\n"
+        f"Required answer language:\n{_answer_language_instruction(final_question)}\n\n"
         f"Retrieved document context:\n{context}"
     )
+
+
+def _answer_language_instruction(question: str) -> str:
+    cyrillic_count = len(re.findall(r"[А-Яа-яЁё]", question))
+    latin_count = len(re.findall(r"[A-Za-z]", question))
+    if cyrillic_count and cyrillic_count >= latin_count:
+        return "Russian. Answer in Russian."
+    if latin_count > cyrillic_count:
+        return "English. Answer in English."
+    return "Use the same language as the final standalone question."
 
 
 def parse_provider_answer(raw_response: str) -> ProviderAnswer | None:

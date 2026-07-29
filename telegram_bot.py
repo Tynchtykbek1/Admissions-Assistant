@@ -258,38 +258,7 @@ def format_backend_response(result: dict, language: str = "en") -> str:
     if not isinstance(answer, str) or not answer.strip():
         raise ValueError("The backend returned an empty answer.")
 
-    source_labels = []
-    seen_sources = set()
-    for source in result.get("sources", []):
-        if not isinstance(source, dict):
-            continue
-        filename = source.get("filename")
-        if not filename:
-            continue
-        faq_id = source.get("faq_id")
-        identity = (str(filename), faq_id, source.get("chunk_id"))
-        if identity in seen_sources:
-            continue
-        seen_sources.add(identity)
-        label = str(filename)
-        if faq_id is not None:
-            label += f" — FAQ {faq_id}"
-        source_labels.append(label)
-        if len(source_labels) == 5:
-            break
-
-    safe_answer = sanitize_for_html(answer)
-    if not source_labels:
-        return safe_answer
-
-    if language == "ru":
-        heading = "Источник" if len(source_labels) == 1 else "Источники"
-    else:
-        heading = "Source" if len(source_labels) == 1 else "Sources"
-    sources_text = "\n".join(
-        f"• {html.escape(label, quote=False)}" for label in source_labels
-    )
-    return f"{safe_answer}\n\n{heading}:\n{sources_text}"
+    return sanitize_for_html(answer)
 
 
 def split_message(text: str, max_length: int = MAX_MESSAGE_LENGTH) -> list[str]:

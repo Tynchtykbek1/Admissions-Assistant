@@ -34,9 +34,10 @@ def make_update(text="question", language_code="ru", chat_id=123, user_id=456):
 
 
 class TelegramFormattingTests(unittest.TestCase):
-    def test_formats_unique_source_filenames(self):
+    def test_success_displays_answer_only_without_technical_sources(self):
         result = {
             "answer": "The deadline is 30 April.",
+            "status": "success",
             "sources": [
                 {"filename": "admissions.pdf", "chunk_id": 1},
                 {"filename": "admissions.pdf", "chunk_id": 1},
@@ -44,9 +45,28 @@ class TelegramFormattingTests(unittest.TestCase):
             ],
         }
         formatted = format_backend_response(result)
-        self.assertEqual(formatted.count("admissions.pdf"), 1)
-        self.assertIn("faq.txt", formatted)
-        self.assertIn("FAQ 12", formatted)
+        self.assertEqual(formatted, "The deadline is 30 April.")
+        for technical_text in (
+            "Источники", "Sources", "admissions.pdf", "faq.txt",
+            "FAQ", "chunk", "0.91",
+        ):
+            self.assertNotIn(technical_text, formatted)
+
+    def test_partial_information_displays_answer_only(self):
+        result = {
+            "answer": "The document supports only part of the answer.",
+            "status": "partial_information",
+            "sources": [{
+                "filename": "private-faq.pdf",
+                "chunk_id": 44,
+                "faq_id": 91,
+                "score": 0.91,
+            }],
+        }
+        self.assertEqual(
+            format_backend_response(result),
+            "The document supports only part of the answer.",
+        )
 
     def test_removes_raw_markdown_and_escapes_html(self):
         formatted = format_backend_response({"answer": "**Документы** <важно>", "sources": []}, "ru")
@@ -80,7 +100,7 @@ class TelegramFormattingTests(unittest.TestCase):
         self.assertEqual(format_backend_response(result, "ru"), NO_INFORMATION_MESSAGES["ru"])
         self.assertEqual(format_backend_response(result, "en"), NO_INFORMATION_MESSAGES["en"])
 
-    def test_success_with_insufficient_phrase_remains_visible_with_sources(self):
+    def test_success_with_insufficient_phrase_remains_visible_without_sources(self):
         result = {
             "status": "success",
             "answer": (
@@ -92,7 +112,7 @@ class TelegramFormattingTests(unittest.TestCase):
         formatted = format_backend_response(result, "ru")
         self.assertIn("Недостаточно информации для полного списка", formatted)
         self.assertIn("• гарантийное письмо", formatted)
-        self.assertIn("FAQ.docx.pdf", formatted)
+        self.assertNotIn("FAQ.docx.pdf", formatted)
         self.assertNotEqual(formatted, NO_INFORMATION_MESSAGES["ru"])
 
     def test_localizes_provider_unavailable_exactly(self):

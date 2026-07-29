@@ -14,6 +14,7 @@ from telegram_bot import (
     RESET_MESSAGES,
     START_MESSAGES,
     SYSTEM_DOCUMENT_UNAVAILABLE_MESSAGES,
+    detect_text_language,
     format_backend_response,
     handle_question,
     help_command,
@@ -34,6 +35,31 @@ def make_update(text="question", language_code="ru", chat_id=123, user_id=456):
 
 
 class TelegramFormattingTests(unittest.TestCase):
+    def test_mixed_russian_questions_use_russian(self):
+        for question in (
+            "Sapienza дедлайн?",
+            "Bocconi сроки?",
+            "Politecnico документы?",
+            "University of Messina поступление?",
+            "DSU стипендия есть?",
+            "IELTS нужен?",
+            "Нужен ли TOEFL?",
+            "Виза для Sapienza нужна?",
+        ):
+            self.assertEqual(detect_text_language(question), "ru")
+
+    def test_english_only_questions_use_english(self):
+        for question in (
+            "What is the Sapienza deadline?",
+            "Is IELTS required?",
+            "What documents are required?",
+        ):
+            self.assertEqual(detect_text_language(question), "en")
+
+    def test_no_letter_input_keeps_russian_default(self):
+        self.assertEqual(detect_text_language(""), "ru")
+        self.assertEqual(detect_text_language("?! … 123"), "ru")
+
     def test_success_displays_answer_only_without_technical_sources(self):
         result = {
             "answer": "The deadline is 30 April.",
@@ -280,6 +306,53 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
             with patch("telegram_bot.ask_backend", new=AsyncMock(return_value=backend_result)):
                 await handle_question(update, SimpleNamespace())
             self.assertEqual(update.message.reply_text.await_args.args[0], NO_INFORMATION_MESSAGES[language])
+
+    async def test_mixed_russian_question_uses_russian_backend_fallback(self):
+        update = make_update("Sapienza дедлайн?")
+        backend_result = {
+            "status": "insufficient_document_information",
+            "answer": "ignored",
+            "sources": [{
+                "filename": "hidden.pdf",
+                "faq_id": 17,
+                "chunk_id": 4,
+                "score": 0.91,
+            }],
+        }
+        with patch(
+            "telegram_bot.ask_backend", new=AsyncMock(return_value=backend_result)
+        ):
+            await handle_question(update, SimpleNamespace())
+        sent = update.message.reply_text.await_args.args[0]
+        self.assertEqual(sent, NO_INFORMATION_MESSAGES["ru"])
+        for technical_text in ("hidden.pdf", "FAQ", "chunk", "0.91", "Источники", "Sources"):
+            self.assertNotIn(technical_text, sent)
+
+    async def test_english_question_uses_english_backend_fallback(self):
+        update = make_update("What documents are required?")
+        backend_result = {
+            "status": "insufficient_document_information",
+            "answer": "ignored",
+            "sources": [],
+        }
+        with patch(
+            "telegram_bot.ask_backend", new=AsyncMock(return_value=backend_result)
+        ):
+            await handle_question(update, SimpleNamespace())
+        self.assertEqual(
+            update.message.reply_text.await_args.args[0],
+            NO_INFORMATION_MESSAGES["en"],
+        )
+
+    async def test_russian_manager_response_uses_russian_language_detection(self):
+        question = "Кто твой менеджер?"
+        self.assertEqual(detect_text_language(f"Sapienza {question}"), "ru")
+        update = make_update(question)
+        await handle_question(update, SimpleNamespace(chat_data={}))
+        self.assertEqual(
+            update.message.reply_text.await_args.args[0],
+            LOCAL_RESPONSES["manager"]["ru"],
+        )
 
     async def test_localized_backend_error(self):
         for question, language in (("Какие требования?", "ru"), ("What requirements?", "en")):

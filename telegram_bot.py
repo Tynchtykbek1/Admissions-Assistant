@@ -226,9 +226,11 @@ def language_from_code(language_code: str | None) -> str:
 
 
 def detect_text_language(text: str) -> str:
-    cyrillic_count = len(re.findall(r"[А-Яа-яЁё]", text))
-    latin_count = len(re.findall(r"[A-Za-z]", text))
-    return "ru" if cyrillic_count >= latin_count else "en"
+    if re.search(r"[А-Яа-яЁё]", text):
+        return "ru"
+    if re.search(r"[A-Za-z]", text):
+        return "en"
+    return "ru"
 
 
 def sanitize_for_html(text: str) -> str:

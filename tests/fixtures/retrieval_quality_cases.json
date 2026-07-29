@@ -1,0 +1,16 @@
+[
+  {"question": "Какие документы нужны?", "expected_faq_ids": [101]},
+  {"question": "Какие доки нужны?", "expected_faq_ids": [101]},
+  {"question": "Дедлайны напиши", "expected_faq_ids": [102]},
+  {"question": "Когда подаваться?", "expected_faq_ids": [102]},
+  {"question": "Документы для визы", "expected_faq_ids": [103]},
+  {"question": "Нужен ли IELTS?", "expected_faq_ids": [104]},
+  {"question": "Что нужно апостилировать?", "expected_faq_ids": [105]},
+  {"question": "Есть ли стипендия?", "expected_faq_ids": [106]},
+  {"question": "Required docs", "expected_faq_ids": [101]},
+  {"question": "Application deadlines", "expected_faq_ids": [102]},
+  {"question": "When can I apply?", "expected_faq_ids": [102]},
+  {"question": "Student visa documents", "expected_faq_ids": [103]},
+  {"question": "Is IELTS required?", "expected_faq_ids": [104]},
+  {"question": "Do I need an apostille?", "expected_faq_ids": [105]}
+]

@@ -27,6 +27,7 @@ from retrieval_settings import (
     SEMANTIC_FALLBACK_SCORE_THRESHOLD,
     SEMANTIC_SCORE_THRESHOLD,
     SEMANTIC_TOP_K,
+    CONTEXT_SCORE_MARGIN,
 )
 
 
@@ -217,6 +218,7 @@ def answer_conversation_question(
         top_k=SEMANTIC_TOP_K,
         min_score=SEMANTIC_SCORE_THRESHOLD,
         fallback_score_threshold=SEMANTIC_FALLBACK_SCORE_THRESHOLD,
+        context_score_margin=CONTEXT_SCORE_MARGIN,
     )
     retrieval_duration_ms = (time.perf_counter() - retrieval_started_at) * 1000
 

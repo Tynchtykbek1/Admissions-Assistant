@@ -160,17 +160,24 @@ def generate_provider_text(
 def build_context(relevant_chunks: list[dict]) -> str:
     context_parts = []
     for source_number, chunk in enumerate(relevant_chunks, start=1):
-        identifier = (
-            f"FAQ ID: {chunk['faq_id']}"
-            if "faq_id" in chunk
-            else f"Chunk ID: {chunk['chunk_id']}"
-        )
-        context_parts.append(
-            f"Source {source_number}:\n"
-            f"Filename: {chunk['filename']}\n"
-            f"{identifier}\n"
-            f"Content:\n{chunk['text']}"
-        )
+        if "faq_id" in chunk and (chunk.get("question") or chunk.get("answer")):
+            fields = [
+                f"Source {source_number}:",
+                f"Filename: {chunk['filename']}",
+                f"FAQ ID: {chunk['faq_id']}",
+            ]
+            if chunk.get("question"):
+                fields.extend(("FAQ question:", chunk["question"]))
+            if chunk.get("answer"):
+                fields.extend(("FAQ answer:", chunk["answer"]))
+            context_parts.append("\n".join(fields))
+        else:
+            context_parts.append(
+                f"Source {source_number}:\n"
+                f"Filename: {chunk['filename']}\n"
+                f"Chunk ID: {chunk['chunk_id']}\n"
+                f"Content:\n{chunk['text']}"
+            )
     return "\n\n".join(context_parts)
 
 

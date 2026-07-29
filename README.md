@@ -19,9 +19,9 @@ FastAPI /chat
         |
         +--> SYSTEM_DOCUMENT_ID --> document-scoped chunks
         |
-        +--> semantic / exact FAQ retrieval
+        +--> normalized semantic / exact / lexical FAQ retrieval
         |
-        +--> structured Gemini/OpenAI answer
+        +--> structured FAQ question-and-answer context --> Gemini/OpenAI answer
         |
         +--> persisted assistant turn + safe sources
 ```
@@ -203,6 +203,7 @@ Copy `.env.example` to `.env` and set credentials. Never commit `.env`.
 | `SEMANTIC_SCORE_THRESHOLD` | `0.20` | Primary semantic threshold |
 | `SEMANTIC_FALLBACK_SCORE_THRESHOLD` | `0.18` | Conservative fallback threshold |
 | `SEMANTIC_FALLBACK_SAFE_MINIMUM` | `0.15` | Lower bound for fallback threshold |
+| `CONTEXT_SCORE_MARGIN` | `0.12` | Maximum final-score gap for additional context |
 | `MAX_UPLOAD_SIZE_MB` | `15` | Upload limit |
 | `DOCUMENT_CACHE_SIZE` | `8` | Bounded document chunk cache |
 | `BACKEND_CONNECT_TIMEOUT_SECONDS` | `10` | Telegram-to-backend connection timeout |
@@ -215,6 +216,43 @@ Copy `.env.example` to `.env` and set credentials. Never commit `.env`.
 
 The application does not log API keys, Telegram tokens, full histories, complete
 documents, authorization headers, or full LLM prompts.
+
+### Retrieval quality controls
+
+Short Russian and English admissions wording is expanded with explicit retrieval
+hints only (for example, deadline, application-period, document, student-visa,
+apostille, IELTS/language-certificate, scholarship, letter, tuition, and enrollment
+terms). The original question remains unchanged in responses and conversation
+storage. The hints add no dates, scores, university names, document lists, or other
+facts.
+
+Accepted candidates are ranked by semantic score plus the existing exact/partial
+FAQ boost and a bounded lexical bonus of at most `0.20`. FAQ-question token overlap
+has three times the weight of FAQ-answer overlap; generic admissions words are
+stopwords. Lexical relevance can rerank a candidate but cannot bypass semantic
+acceptance. Final context always keeps the strongest eligible result and exact FAQ
+matches, then keeps only results within `CONTEXT_SCORE_MARGIN` (default `0.12`) of
+the strongest score, up to `SEMANTIC_TOP_K`.
+
+FAQ context sent to Gemini or OpenAI contains separately labeled FAQ question and
+answer fields. Ordinary document chunks retain the existing content format.
+
+Evaluate a synthetic/test index without calling an answer provider:
+
+```shell
+python scripts/evaluate_retrieval.py --database test.db --document-id 1 \
+  --cases tests/fixtures/retrieval_quality_cases.json
+```
+
+Audit stored index field counts without reading or repairing content:
+
+```shell
+python scripts/audit_document_index.py --document-id 1
+```
+
+Neither command modifies the original PDF. The audit is read-only, production
+embeddings are not automatically reindexed by these tools, and the embedding model
+and semantic thresholds remain unchanged.
 
 Provider responses may occasionally take longer than 45 seconds, so Telegram waits
 up to 90 seconds for the backend response body by default. This is an upper bound,

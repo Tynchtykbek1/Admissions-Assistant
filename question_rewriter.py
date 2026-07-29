@@ -26,11 +26,11 @@ ADMISSIONS_SUBJECT_PATTERNS = (
     r"apostille|scholarship\w*|recommendation|motivation|tuition|enrollment)\b",
 )
 UNRESOLVED_REFERENCE_PATTERNS = (
-    r"\b(?:это|этот|эта|эти|них|ими|там|тогда|раньше|после приезда)\b",
+    r"\b(?:это|этот|эта|эти|он|она|они|них|ими|там|тогда|раньше)\b",
     r"^(?:какие именно|что из них|а кому(?:\s+надо)?\s+написать|а сколько|сколько|а на каком языке|"
-    r"а раньше можно|а после приезда)\??$",
+    r"а раньше можно|а после приезда|что после приезда)\??$",
     r"^(?:which ones|is it mandatory|how much|what about after arrival)\??$",
-    r"\b(?:it|this|that|they|them|those|there|then)\b",
+    r"\b(?:it|this|that|these|those|they|them|there|then)\b",
 )
 QUALIFIED_CONNECTOR_PATTERNS = (
     r"^(?:а|и)\s+(?:сроки|для визы|раньше можно|на каком языке|после приезда|сколько)\??$",
@@ -55,14 +55,20 @@ def is_likely_follow_up(question: str, history: list[dict] | None = None) -> boo
     normalized = " ".join(question.casefold().split())
     if not normalized or not history:
         return False
-    if has_standalone_admissions_subject(normalized) and not any(
-        re.search(pattern, normalized) for pattern in QUALIFIED_CONNECTOR_PATTERNS
-    ):
-        return False
-    return any(
-        re.search(pattern, normalized)
-        for pattern in (*UNRESOLVED_REFERENCE_PATTERNS, *QUALIFIED_CONNECTOR_PATTERNS)
+
+    has_unresolved_reference = any(
+        re.search(pattern, normalized) for pattern in UNRESOLVED_REFERENCE_PATTERNS
     )
+    has_qualified_connector = any(
+        re.search(pattern, normalized) for pattern in QUALIFIED_CONNECTOR_PATTERNS
+    )
+    if has_unresolved_reference:
+        return True
+    if has_qualified_connector:
+        return True
+    if has_standalone_admissions_subject(normalized):
+        return False
+    return False
 
 
 def select_rewrite_history(history: list[dict]) -> list[dict]:

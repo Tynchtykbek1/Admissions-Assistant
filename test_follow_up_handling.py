@@ -22,11 +22,18 @@ HISTORY = [
     "А документы для визы какие нужны?",
     "А IELTS обязателен?",
     "А стипендия есть?",
+    "Есть ли стипендия?",
     "И какие документы нужны для поступления?",
     "Документы для визы",
+    "А какие документы нужны для визы?",
+    "Что делать после приезда?",
+    "Какие документы нужны после приезда?",
     "Application deadlines?",
+    "What documents are required?",
     "And what documents are required for the visa?",
     "Is IELTS required?",
+    "What should I do after arrival?",
+    "Which documents are required after arrival?",
 ])
 def test_clear_admissions_questions_are_standalone(question):
     assert is_likely_follow_up(question, HISTORY) is False
@@ -50,10 +57,56 @@ def test_clear_admissions_questions_are_standalone(question):
     "Which ones?",
     "What about after arrival?",
     "Is it mandatory?",
+    "Что после приезда?",
 ])
 def test_ambiguous_contextual_questions_are_follow_ups_only_with_history(question):
     assert is_likely_follow_up(question, HISTORY) is True
     assert is_likely_follow_up(question, []) is False
+
+
+@pytest.mark.parametrize("question", [
+    "Это обязательный документ?",
+    "Этот документ нужен?",
+    "Эти документы тоже нужны?",
+    "Этот сертификат подойдёт?",
+    "Она нужна для визы?",
+    "Они должны быть переведены?",
+    "Там нужен апостиль?",
+    "Is this document required?",
+    "Is that certificate accepted?",
+    "Are these documents enough?",
+    "Do they need to be translated?",
+    "Is it required for the visa?",
+])
+def test_unresolved_references_override_admissions_subjects(question):
+    assert is_likely_follow_up(question, HISTORY) is True
+
+
+@pytest.mark.parametrize("question", [
+    "Это обязательный документ?",
+    "Этот документ нужен?",
+    "Is this document required?",
+    "Do they need to be translated?",
+    "А после приезда?",
+    "Что после приезда?",
+    "What about after arrival?",
+])
+def test_ambiguous_fragments_without_history_remain_unchanged(question):
+    with patch("question_rewriter.generate_provider_text") as provider:
+        result = rewrite_question(question, [])
+    provider.assert_not_called()
+    assert result.standalone_question == question
+    assert result.rewrite_used is False
+
+
+def test_reference_follow_up_calls_rewrite_provider_at_most_once():
+    with patch(
+        "question_rewriter.generate_provider_text",
+        return_value="Нужен ли ранее упомянутый документ?",
+    ) as provider:
+        result = rewrite_question("Этот документ нужен?", HISTORY)
+    provider.assert_called_once()
+    assert result.rewrite_used is True
 
 
 def test_follow_up_calls_provider_once_with_minimal_recent_history():

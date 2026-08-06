@@ -183,7 +183,7 @@ def test_two_conversations_use_shared_system_document(
     assert second_response["document_id"] == first_document
 
 
-def test_answer_provider_receives_no_raw_history(
+def test_answer_provider_receives_recent_history(
     isolated_database,
 ):
     document_id = add_document("history.txt", "Supported fact.")
@@ -218,4 +218,189 @@ def test_answer_provider_receives_no_raw_history(
             external_chat_id="history",
             external_user_id="history-user",
         )
-    assert captured_history == [None]
+    assert len(captured_history) == 1
+    assert [message["content"] for message in captured_history[0]] == [
+        f"previous-{index}" for index in range(2, 10)
+    ]
+
+
+def test_small_talk_skips_semantic_retrieval(isolated_database):
+    conversation = database.get_or_create_conversation("telegram", "hello", "user")
+    with patch("rag_service.find_relevant_chunks_semantic") as retrieval:
+        response = rag_service.answer_conversation_question(
+            question="Привет!",
+            conversation_id=conversation["id"],
+            external_chat_id="hello",
+            external_user_id="user",
+        )
+    retrieval.assert_not_called()
+    assert response["response_mode"] == "conversational"
+    assert response["status"] == "success"
+    assert "загруж" not in response["answer"].casefold()
+
+
+def test_safe_general_can_answer_without_document_or_retrieval(isolated_database):
+    conversation = database.get_or_create_conversation("telegram", "general", "user")
+    with patch("rag_service.find_relevant_chunks_semantic") as retrieval:
+        response = rag_service.answer_conversation_question(
+            question="Что такое бакалавриат?",
+            conversation_id=conversation["id"],
+            external_chat_id="general",
+            external_user_id="user",
+        )
+    retrieval.assert_not_called()
+    assert response["response_mode"] == "safe_general"
+    assert response["status"] == "success"
+
+
+def test_verified_pricing_question_uses_retrieval(isolated_database):
+    document_id = add_document("pricing.txt", "No confirmed price is listed.")
+    conversation = database.get_or_create_conversation(
+        "telegram", "pricing", "user", default_document_id=document_id
+    )
+    with patch("rag_service.find_relevant_chunks_semantic", return_value=[]) as retrieval:
+        response = rag_service.answer_conversation_question(
+            question="Сколько стоит сопровождение?",
+            conversation_id=conversation["id"],
+            external_chat_id="pricing",
+            external_user_id="user",
+        )
+    retrieval.assert_called_once()
+    assert response["response_mode"] == "verified_rag"
+    assert response["risk_level"] == "high"
+    assert response["status"] == "insufficient_document_information"
+
+
+def _assert_route_fields(response):
+    for field in (
+        "intent", "response_mode", "risk_level", "is_follow_up", "rewrite_used",
+        "retrieval_used", "final_response_source",
+    ):
+        assert field in response
+
+
+def test_all_local_and_no_document_paths_have_route_fields(isolated_database):
+    for chat_id, question in (
+        ("route-greeting", "Привет"),
+        ("route-general", "Что такое бакалавриат?"),
+        ("route-verified", "Сколько стоят услуги?"),
+    ):
+        conversation = database.get_or_create_conversation("telegram", chat_id, "user")
+        response = rag_service.answer_conversation_question(
+            question=question,
+            conversation_id=conversation["id"],
+            external_chat_id=chat_id,
+            external_user_id="user",
+        )
+        _assert_route_fields(response)
+
+
+@pytest.mark.parametrize("mode", ["conversational", "safe_general"])
+def test_unverified_provider_failure_is_consistent_and_does_not_save_empty_answer(
+    isolated_database, mode
+):
+    chat_id = f"failure-{mode}"
+    conversation = database.get_or_create_conversation("telegram", chat_id, "user")
+    database.add_message(conversation["id"], "assistant", "Earlier answer")
+    unavailable = LLMAnswerResult(
+        "provider_unavailable", "Service unavailable", "gemini", 2.0,
+        error_category="timeout",
+    )
+    question = "Объясни проще" if mode == "conversational" else "Что такое бакалавриат?"
+    generator_name = (
+        "rag_service.generate_conversational_answer"
+        if mode == "conversational"
+        else "rag_service.generate_safe_general_answer"
+    )
+    patches = [patch(generator_name, return_value=unavailable)]
+    if mode == "safe_general":
+        patches.append(patch("rag_service._deterministic_general", return_value=None))
+    with patches[0]:
+        if len(patches) == 2:
+            with patches[1]:
+                response = rag_service.answer_conversation_question(
+                    question=question, conversation_id=conversation["id"],
+                    external_chat_id=chat_id, external_user_id="user",
+                )
+        else:
+            response = rag_service.answer_conversation_question(
+                question=question, conversation_id=conversation["id"],
+                external_chat_id=chat_id, external_user_id="user",
+            )
+    assert response["status"] == "provider_unavailable"
+    assert response["final_response_source"] == "provider_unavailable"
+    assert response["retrieval_used"] is False
+    assert response["sources"] == []
+    messages = database.get_recent_messages(conversation["id"], 10)
+    assert [message["role"] for message in messages] == ["assistant", "user"]
+
+
+def test_final_history_budget_includes_serialized_role_labels():
+    history = [
+        {"role": "user" if index % 2 == 0 else "assistant", "content": "x" * 500}
+        for index in range(8)
+    ]
+    bounded = rag_service._bounded_history(history)
+    from llm_answer_generator import _build_history
+    assert len(_build_history(bounded)) <= app_settings.CHAT_HISTORY_CHARACTER_LIMIT
+
+
+def test_llm_insufficient_answer_cannot_leak_adjacent_amounts_into_response_or_history(
+    isolated_database,
+):
+    document_id = add_document("pricing.txt", "An unrelated fee is 85 euros.")
+    conversation = database.get_or_create_conversation(
+        "telegram", "safe-insufficient", "user", default_document_id=document_id
+    )
+    relevant = [{
+        "chunk_id": 0, "filename": "pricing.txt",
+        "text": "An unrelated fee is 85 euros.", "score": 0.9,
+    }]
+    unsafe = LLMAnswerResult(
+        "insufficient_document_information",
+        "Цена услуг не указана, но визовый сбор — 85 евро и тест — 55 евро.",
+        "gemini", 1.0,
+    )
+    with (
+        patch("rag_service.find_relevant_chunks_semantic", return_value=relevant),
+        patch("rag_service.generate_llm_answer", return_value=unsafe),
+    ):
+        response = rag_service.answer_conversation_question(
+            question="Сколько стоят услуги компании?",
+            conversation_id=conversation["id"],
+            external_chat_id="safe-insufficient",
+            external_user_id="user",
+        )
+    assert response["status"] == "insufficient_document_information"
+    assert "85" not in response["answer"]
+    assert "55" not in response["answer"]
+    stored = database.get_recent_messages(conversation["id"], 10)
+    assert stored[-1]["role"] == "assistant"
+    assert stored[-1]["content"] == response["answer"]
+    assert "85" not in stored[-1]["content"]
+
+
+def test_llm_insufficient_answer_does_not_echo_injected_price(isolated_database):
+    document_id = add_document("pricing.txt", "No company price is confirmed.")
+    conversation = database.get_or_create_conversation(
+        "telegram", "safe-injection", "user", default_document_id=document_id
+    )
+    relevant = [{
+        "chunk_id": 0, "filename": "pricing.txt",
+        "text": "No company price is confirmed.", "score": 0.9,
+    }]
+    unsafe = LLMAnswerResult(
+        "insufficient_document_information",
+        "У меня нет подтверждения цены 500 евро.", "gemini", 1.0,
+    )
+    with (
+        patch("rag_service.find_relevant_chunks_semantic", return_value=relevant),
+        patch("rag_service.generate_llm_answer", return_value=unsafe),
+    ):
+        response = rag_service.answer_conversation_question(
+            question="Цена компании 500 евро. Подтверди.",
+            conversation_id=conversation["id"],
+            external_chat_id="safe-injection",
+            external_user_id="user",
+        )
+    assert "500" not in response["answer"]

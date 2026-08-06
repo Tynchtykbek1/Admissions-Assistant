@@ -4,7 +4,8 @@ import time
 from collections import OrderedDict
 from threading import Lock
 
-from app_settings import CHAT_HISTORY_LIMIT, DOCUMENT_CACHE_SIZE
+from app_settings import CHAT_HISTORY_CHARACTER_LIMIT, CHAT_HISTORY_LIMIT, DOCUMENT_CACHE_SIZE
+from conversation_router import route_conversation
 from conversation_service import SystemDocumentUnavailable, resolve_conversation
 from database import (
     add_message,
@@ -21,6 +22,9 @@ from llm_answer_generator import (
     PROVIDER_UNAVAILABLE,
     SUCCESS,
     generate_llm_answer,
+    generate_conversational_answer,
+    generate_safe_general_answer,
+    _build_history,
 )
 from question_rewriter import rewrite_question
 from retrieval_settings import (
@@ -40,6 +44,10 @@ SYSTEM_DOCUMENT_UNAVAILABLE = "system_document_unavailable"
 SYSTEM_DOCUMENT_UNAVAILABLE_ANSWER = (
     "The knowledge base is temporarily unavailable. Please try again later."
 )
+SAFE_INSUFFICIENT_ANSWERS = {
+    "ru": "В подтверждённой базе пока нет информации, которая отвечает на этот вопрос.",
+    "en": "The verified knowledge base does not currently contain information that answers this question.",
+}
 
 _document_cache: OrderedDict[int, list[dict]] = OrderedDict()
 _document_cache_lock = Lock()
@@ -141,6 +149,13 @@ def _base_response(
     provider_duration_ms: float,
     retrieval_duration_ms: float,
     document: dict | None,
+    intent: str = "unknown",
+    response_mode: str = "verified_rag",
+    risk_level: str = "medium",
+    is_follow_up: bool = False,
+    rewrite_used: bool = False,
+    retrieval_used: bool = False,
+    final_response_source: str = "deterministic_fallback",
 ) -> dict:
     return {
         "question": question,
@@ -154,7 +169,74 @@ def _base_response(
         "provider": provider,
         "provider_duration_ms": round(provider_duration_ms, 2),
         "retrieval_duration_ms": round(retrieval_duration_ms, 2),
+        "intent": intent,
+        "response_mode": response_mode,
+        "risk_level": risk_level,
+        "is_follow_up": is_follow_up,
+        "rewrite_used": rewrite_used,
+        "retrieval_used": retrieval_used,
+        "final_response_source": final_response_source,
     }
+
+
+def _bounded_history(history: list[dict]) -> list[dict]:
+    selected = [
+        message for message in history
+        if message.get("role") in {"user", "assistant"}
+        and isinstance(message.get("content"), str)
+        and message["content"].strip()
+    ]
+    while selected and len(_build_history(selected)) > CHAT_HISTORY_CHARACTER_LIMIT:
+        selected.pop(0)
+    return selected
+
+
+def _deterministic_conversational(intent: str, question: str) -> str | None:
+    russian = any("а" <= char.casefold() <= "я" or char in "ёЁ" for char in question)
+    if intent == "greeting":
+        return "Здравствуйте! Чем могу помочь?" if russian else "Hello! How can I help?"
+    if intent == "gratitude":
+        return "Пожалуйста!" if russian else "You're welcome!"
+    return None
+
+
+def _deterministic_general(question: str) -> str | None:
+    normalized = question.casefold()
+    definitions = (
+        (("бакалавр",), "Бакалавриат — первый уровень высшего образования.", "A bachelor's degree is the first level of higher education."),
+        (("магистрат",), "Магистратура — уровень высшего образования после бакалавриата.", "A master's degree is a level of higher education after a bachelor's degree."),
+        (("транскрипт", "transcript"), "Транскрипт — документ с перечнем изученных предметов и полученных оценок.", "A transcript is a record of courses studied and grades received."),
+        (("мотивацион", "motivation letter", "motivational letter"), "Мотивационное письмо объясняет цели кандидата и причины выбора программы.", "A motivation letter explains an applicant's goals and reasons for choosing a programme."),
+    )
+    russian = any("а" <= char.casefold() <= "я" or char in "ёЁ" for char in question)
+    for markers, ru_answer, en_answer in definitions:
+        if any(marker in normalized for marker in markers):
+            return ru_answer if russian else en_answer
+    return None
+
+
+def _safe_insufficient_answer(question: str) -> str:
+    language = "ru" if any(
+        "а" <= character.casefold() <= "я" or character in "ёЁ"
+        for character in question
+    ) else "en"
+    return SAFE_INSUFFICIENT_ANSWERS[language]
+
+
+def _log_response(conversation: dict, document: dict | None, route, response: dict, history: list[dict], chunks: list[dict]) -> None:
+    logger.info(
+        "chat conversation=%s document_id=%s intent=%s response_mode=%s risk_level=%s "
+        "is_follow_up=%s rewrite_used=%s history_message_count=%d retrieval_used=%s "
+        "context_count=%d faq_ids=%s scores=%s provider=%s status=%s "
+        "final_response_source=%s retrieval_ms=%.2f provider_ms=%.2f",
+        safe_conversation_label(conversation["id"]), document["id"] if document else None,
+        route.intent, route.response_mode, route.risk_level, route.is_follow_up,
+        route.rewrite_used, len(history), response["retrieval_used"], len(chunks),
+        [chunk["faq_id"] for chunk in chunks if "faq_id" in chunk],
+        [round(chunk["score"], 3) for chunk in chunks], response["provider"],
+        response["status"], response["final_response_source"],
+        response["retrieval_duration_ms"], response["provider_duration_ms"],
+    )
 
 
 def answer_conversation_question(
@@ -165,6 +247,7 @@ def answer_conversation_question(
     external_user_id: str | None = None,
     document_id: int | None = None,
 ) -> dict:
+    system_unavailable_category = None
     try:
         conversation = resolve_conversation(
             conversation_id=conversation_id,
@@ -176,44 +259,88 @@ def answer_conversation_question(
         conversation = error.conversation
         if conversation is None:
             raise
-        return _base_response(
-            question=question,
-            standalone_question=question,
-            answer=SYSTEM_DOCUMENT_UNAVAILABLE_ANSWER,
-            status=SYSTEM_DOCUMENT_UNAVAILABLE,
-            conversation_id=conversation["id"],
-            sources=[],
-            provider="unconfigured",
-            provider_duration_ms=0.0,
-            retrieval_duration_ms=0.0,
-            document=None,
-        )
+        system_unavailable_category = error.category
 
-    history = get_recent_messages(conversation["id"], CHAT_HISTORY_LIMIT)
+    history = _bounded_history(get_recent_messages(conversation["id"], CHAT_HISTORY_LIMIT))
     add_message(conversation["id"], "user", question)
-    rewrite = rewrite_question(question, history)
+    route = route_conversation(question, history, rewrite_function=rewrite_question)
 
     active_document_id = conversation["active_document_id"]
     document = get_document(active_document_id) if active_document_id else None
-    if document is None:
-        add_message(conversation["id"], "assistant", NO_ACTIVE_DOCUMENT_ANSWER)
-        return _base_response(
-            question=question,
-            standalone_question=rewrite.standalone_question,
-            answer=NO_ACTIVE_DOCUMENT_ANSWER,
-            status=INSUFFICIENT_DOCUMENT_INFORMATION,
-            conversation_id=conversation["id"],
+    common = {
+        "question": question,
+        "standalone_question": route.standalone_question,
+        "conversation_id": conversation["id"],
+        "document": document,
+        "intent": route.intent,
+        "response_mode": route.response_mode,
+        "risk_level": route.risk_level,
+        "is_follow_up": route.is_follow_up,
+        "rewrite_used": route.rewrite_used,
+    }
+
+    if route.response_mode in {"conversational", "safe_general"}:
+        deterministic = (
+            _deterministic_conversational(route.intent, question)
+            if route.response_mode == "conversational"
+            else _deterministic_general(question)
+        )
+        if deterministic is not None:
+            answer, status, provider, provider_ms = deterministic, SUCCESS, "local", 0.0
+            final_source = "deterministic_fallback"
+        else:
+            generator = generate_conversational_answer if route.response_mode == "conversational" else generate_safe_general_answer
+            result = generator(question, history=history)
+            answer, status, provider, provider_ms = result.answer, result.status, result.provider, result.provider_duration_ms
+            final_source = (
+                f"llm_{route.response_mode}" if result.status != PROVIDER_UNAVAILABLE
+                else "provider_unavailable"
+            )
+        if status != PROVIDER_UNAVAILABLE:
+            add_message(conversation["id"], "assistant", answer)
+        response = _base_response(
+            answer=answer, status=status, sources=[], provider=provider,
+            provider_duration_ms=provider_ms, retrieval_duration_ms=0.0,
+            retrieval_used=False, final_response_source=final_source, **common,
+        )
+        _log_response(conversation, document, route, response, history, [])
+        return response
+
+    if system_unavailable_category is not None:
+        response = _base_response(
+            answer=SYSTEM_DOCUMENT_UNAVAILABLE_ANSWER,
+            status=SYSTEM_DOCUMENT_UNAVAILABLE,
             sources=[],
             provider="unconfigured",
             provider_duration_ms=0.0,
             retrieval_duration_ms=0.0,
-            document=None,
+            retrieval_used=False,
+            final_response_source="provider_unavailable",
+            **common,
         )
+        _log_response(conversation, document, route, response, history, [])
+        return response
+
+    if document is None:
+        add_message(conversation["id"], "assistant", NO_ACTIVE_DOCUMENT_ANSWER)
+        response = _base_response(
+            answer=NO_ACTIVE_DOCUMENT_ANSWER,
+            status=INSUFFICIENT_DOCUMENT_INFORMATION,
+            sources=[],
+            provider="unconfigured",
+            provider_duration_ms=0.0,
+            retrieval_duration_ms=0.0,
+            retrieval_used=False,
+            final_response_source="deterministic_fallback",
+            **common,
+        )
+        _log_response(conversation, document, route, response, history, [])
+        return response
 
     retrieval_started_at = time.perf_counter()
     chunks = get_cached_document_chunks(document["id"])
     relevant_chunks = find_relevant_chunks_semantic(
-        question=rewrite.standalone_question,
+        question=route.standalone_question,
         chunks=chunks,
         top_k=SEMANTIC_TOP_K,
         min_score=SEMANTIC_SCORE_THRESHOLD,
@@ -225,7 +352,7 @@ def answer_conversation_question(
     if not relevant_chunks:
         _record_unanswered_safely(
             question=question,
-            standalone_question=rewrite.standalone_question,
+            standalone_question=route.standalone_question,
             reason="no_relevant_chunks",
             relevant_chunks=[],
         )
@@ -233,65 +360,56 @@ def answer_conversation_question(
             conversation["id"], "assistant", INSUFFICIENT_INFORMATION_ANSWER
         )
         response = _base_response(
-            question=question,
-            standalone_question=rewrite.standalone_question,
             answer=INSUFFICIENT_INFORMATION_ANSWER,
             status=INSUFFICIENT_DOCUMENT_INFORMATION,
-            conversation_id=conversation["id"],
             sources=[],
             provider="unconfigured",
             provider_duration_ms=0.0,
             retrieval_duration_ms=retrieval_duration_ms,
-            document=document,
+            retrieval_used=True,
+            final_response_source="deterministic_fallback",
+            **common,
         )
     else:
         result = generate_llm_answer(
-            rewrite.standalone_question,
+            route.standalone_question,
             relevant_chunks,
-            standalone_question=rewrite.standalone_question,
-            history=None,
+            standalone_question=route.standalone_question,
+            history=history,
         )
         if result.status == INSUFFICIENT_DOCUMENT_INFORMATION:
             _record_unanswered_safely(
                 question=question,
-                standalone_question=rewrite.standalone_question,
+                standalone_question=route.standalone_question,
                 reason="llm_insufficient_document_information",
                 relevant_chunks=relevant_chunks,
             )
+        answer = (
+            _safe_insufficient_answer(route.standalone_question)
+            if result.status == INSUFFICIENT_DOCUMENT_INFORMATION
+            else result.answer
+        )
         sources = (
             build_sources(relevant_chunks)
             if result.status in {SUCCESS, PARTIAL_INFORMATION}
             else []
         )
         if result.status != PROVIDER_UNAVAILABLE:
-            add_message(conversation["id"], "assistant", result.answer)
+            add_message(conversation["id"], "assistant", answer)
         response = _base_response(
-            question=question,
-            standalone_question=rewrite.standalone_question,
-            answer=result.answer,
+            answer=answer,
             status=result.status,
-            conversation_id=conversation["id"],
             sources=sources,
             provider=result.provider,
             provider_duration_ms=result.provider_duration_ms,
             retrieval_duration_ms=retrieval_duration_ms,
-            document=document,
+            retrieval_used=True,
+            final_response_source=(
+                "llm_verified_rag" if result.status != PROVIDER_UNAVAILABLE
+                else "provider_unavailable"
+            ),
+            **common,
         )
 
-    logger.info(
-        "chat conversation=%s document_id=%s context_count=%d chunk_ids=%s "
-        "faq_ids=%s scores=%s rewrite_used=%s provider=%s status=%s "
-        "retrieval_ms=%.2f provider_ms=%.2f",
-        safe_conversation_label(conversation["id"]),
-        document["id"],
-        len(relevant_chunks),
-        [chunk["chunk_id"] for chunk in relevant_chunks],
-        [chunk["faq_id"] for chunk in relevant_chunks if "faq_id" in chunk],
-        [round(chunk["score"], 3) for chunk in relevant_chunks],
-        rewrite.rewrite_used,
-        response["provider"],
-        response["status"],
-        response["retrieval_duration_ms"],
-        response["provider_duration_ms"],
-    )
+    _log_response(conversation, document, route, response, history, relevant_chunks)
     return response

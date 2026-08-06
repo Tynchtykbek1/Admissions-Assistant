@@ -225,3 +225,19 @@ def test_markdown_fenced_json_is_accepted(monkeypatch):
         result = llm.generate_llm_answer("question", CHUNKS)
     assert result.status == llm.SUCCESS
     assert result.answer == "Supported answer."
+
+
+@pytest.mark.parametrize("generator_name", [
+    "generate_conversational_answer",
+    "generate_safe_general_answer",
+])
+def test_unverified_generators_reject_non_success_status(monkeypatch, generator_name):
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    generator = getattr(llm, generator_name)
+    with patch(
+        "llm_answer_generator.generate_provider_text",
+        return_value=provider_answer("insufficient_document_information", "No answer"),
+    ):
+        result = generator("Explain this", [])
+    assert result.status == llm.PROVIDER_UNAVAILABLE
+    assert result.error_category == "malformed_response"

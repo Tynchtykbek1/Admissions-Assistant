@@ -209,6 +209,29 @@ def test_missing_or_empty_system_document_is_controlled(
     assert empty.json()["status"] == "system_document_unavailable"
 
 
+def test_safe_routes_do_not_require_available_system_document(tmp_path, monkeypatch):
+    _, _, _, _, app_module = _load_modules(tmp_path, monkeypatch, "999")
+    with TestClient(app_module.app) as client:
+        greeting = client.post("/chat", json={
+            "question": "Привет", "external_chat_id": "safe-chat-1",
+            "external_user_id": "user",
+        })
+        definition = client.post("/chat", json={
+            "question": "Что такое бакалавриат?", "external_chat_id": "safe-chat-2",
+            "external_user_id": "user",
+        })
+        verified = client.post("/chat", json={
+            "question": "Сколько стоят услуги?", "external_chat_id": "safe-chat-3",
+            "external_user_id": "user",
+        })
+    assert greeting.status_code == 200
+    assert greeting.json()["response_mode"] == "conversational"
+    assert definition.status_code == 200
+    assert definition.json()["response_mode"] == "safe_general"
+    assert verified.status_code == 503
+    assert verified.json()["status"] == "system_document_unavailable"
+
+
 def test_ready_requires_available_system_document_with_chunks(
     tmp_path, monkeypatch
 ):

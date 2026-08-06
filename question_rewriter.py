@@ -3,7 +3,11 @@ import re
 import logging
 from dataclasses import dataclass
 
-from app_settings import QUESTION_REWRITE_ENABLED
+from app_settings import (
+    QUESTION_REWRITE_ENABLED,
+    REWRITE_HISTORY_CHARACTER_LIMIT,
+    REWRITE_HISTORY_MESSAGE_LIMIT,
+)
 from llm_answer_generator import generate_provider_text
 
 
@@ -26,6 +30,15 @@ ADMISSIONS_SUBJECT_PATTERNS = (
     r"apostille|scholarship\w*|recommendation|motivation|tuition|enrollment)\b",
 )
 UNRESOLVED_REFERENCE_PATTERNS = (
+    r"\b(?:это|этот|эта|эту|эти|них|ними|потом|после\s+этого|эта\s+цена|эту\s+цену)\b",
+    r"^(?:а\s+)?(?:какие\s+гарантии|какие\s+документы|документы|для\s+магистратуры|что\s+дальше|куда\s+потом\s+подавать|"
+    r"это\s+обязательно|какие\s+именно|что\s+из\s+них|если\s+откажут|после\s+этого|сколько\s+это\s+занимает)\??$",
+    r"^(?:and\s+what\s+is\s+included|what\s+about\s+guarantees|is\s+that\s+mandatory|"
+    r"how\s+long\s+does\s+it\s+take)\??$",
+    r"^(?:спасибо(?:\s+большое)?[,\s]+)?(?:а\s+)?какие\s+гарантии\??$",
+    r"^(?:thanks?[,\s]+)?(?:is\s+the\s+visa\s+guaranteed|what\s+about\s+guarantees)\??$",
+    r"^(?:почему|и\s+дальше|а\s+в\s+[^?]+|нет[,]?\s+(?:я\s+про|для)\s+.+|а\s+если\s+отказ)\??[.]?$",
+    r"^(?:no[,]?\s+i\s+mean\s+.+)\??[.]?$",
     r"\b(?:это|этот|эта|эти|он|она|они|них|ими|там|тогда|раньше)\b",
     r"^(?:какие именно|что из них|а кому(?:\s+надо)?\s+написать|а сколько|сколько|а на каком языке|"
     r"а раньше можно|а после приезда|что после приезда)\??$",
@@ -37,9 +50,6 @@ QUALIFIED_CONNECTOR_PATTERNS = (
     r"^(?:what about)\s+(?:the\s+)?(?:visa|deadline|after arrival)\??$",
     r"^(?:and)\s+(?:the\s+)?deadline\??$",
 )
-REWRITE_HISTORY_CHARACTER_LIMIT = 2000
-
-
 @dataclass(frozen=True)
 class RewriteResult:
     standalone_question: str
@@ -72,24 +82,18 @@ def is_likely_follow_up(question: str, history: list[dict] | None = None) -> boo
 
 
 def select_rewrite_history(history: list[dict]) -> list[dict]:
-    """Select the most recent user/assistant pair within a small prompt budget."""
-    pairs = []
-    pending_assistant = None
-    for message in reversed(history):
-        if message.get("role") == "assistant" and pending_assistant is None:
-            pending_assistant = message
-        elif message.get("role") == "user":
-            pair = [message]
-            if pending_assistant is not None:
-                pair.append(pending_assistant)
-            pairs.append(pair)
-            pending_assistant = None
-            if len(pairs) == 1:
-                break
-    selected = [message for pair in reversed(pairs) for message in pair]
-    while selected and len(_history_text(selected)) > REWRITE_HISTORY_CHARACTER_LIMIT:
-        selected.pop(0)
-    return selected
+    """Return valid recent messages in order within message and character budgets."""
+    valid = [
+        {"role": message.get("role"), "content": message.get("content", "").strip()}
+        for message in history
+        if isinstance(message, dict)
+        and message.get("role") in {"user", "assistant"}
+        and isinstance(message.get("content"), str)
+        and message["content"].strip()
+    ][-REWRITE_HISTORY_MESSAGE_LIMIT:]
+    while valid and len(_history_text(valid)) > REWRITE_HISTORY_CHARACTER_LIMIT:
+        valid.pop(0)
+    return valid
 
 
 def _history_text(history: list[dict]) -> str:
@@ -115,6 +119,31 @@ def _valid_rewrite(original: str, candidate: object) -> str | None:
     if len(rewritten) > max(500, len(original) * 8):
         return None
     return rewritten
+
+
+def _deterministic_rewrite(question: str, history: list[dict]) -> RewriteResult:
+    selected = select_rewrite_history(history)
+    topic_start = None
+    for index in range(len(selected)):
+        message = selected[index]
+        if message["role"] != "user":
+            continue
+        candidate = message["content"].strip()
+        if not is_likely_follow_up(candidate, selected[:index]):
+            topic_start = index
+    if topic_start is None:
+        return RewriteResult(question, False)
+    topic_turns = [
+        message["content"].strip()
+        for message in selected[topic_start:]
+        if message["role"] == "user" and message["content"].strip()
+    ]
+    anchor = " / ".join(topic_turns)
+    if re.search(r"[А-Яа-яЁё]", question):
+        standalone = f"{question.rstrip()} В контексте предыдущего вопроса: {anchor}"
+    else:
+        standalone = f"{question.rstrip()} In the context of the previous question: {anchor}"
+    return RewriteResult(standalone[:500], True)
 
 
 def rewrite_question(question: str, history: list[dict]) -> RewriteResult:
@@ -143,8 +172,8 @@ def rewrite_question(question: str, history: list[dict]) -> RewriteResult:
         logger.warning(
             "Question rewrite failed safely category=%s.", type(error).__name__
         )
-        return RewriteResult(question, False)
+        return _deterministic_rewrite(question, history)
     rewritten = _valid_rewrite(question, candidate)
     if rewritten is None:
-        return RewriteResult(question, False)
+        return _deterministic_rewrite(question, history)
     return RewriteResult(rewritten, rewritten != question)

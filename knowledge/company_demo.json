@@ -1,0 +1,246 @@
+[
+  {
+    "id": "company_services_001",
+    "question": {"ru": "Чем помогает компания?", "en": "How does the company help?"},
+    "answer": {"ru": "", "en": ""},
+    "category": "company_services", "subcategory": "service_scope",
+    "approval_status": "pending_approval", "approved_by": null, "usage_scope": "production",
+    "source_type": "company_manager", "source_reference": null,
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": [], "en": []}
+  },
+  {
+    "id": "company_services_002",
+    "question": {"ru": "Что входит в сопровождение?", "en": "What is included in the support service?"},
+    "answer": {"ru": "", "en": ""},
+    "category": "company_services", "subcategory": "included_services",
+    "approval_status": "pending_approval", "approved_by": null, "usage_scope": "production",
+    "source_type": "company_manager", "source_reference": null,
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": [], "en": []}
+  },
+  {
+    "id": "company_destinations_001",
+    "question": {"ru": "С поступлением в какие страны помогает компания?", "en": "Which countries does the company help students apply to?"},
+    "answer": {
+      "ru": "Компания помогает с поступлением в страны Европы, особенно в Италию, а также в Китай, Южную Корею и Японию. С поступлением в США компания работает реже.",
+      "en": "The company assists with university applications to European countries, especially Italy, as well as China, South Korea and Japan. The company works with applications to the United States less frequently."
+    },
+    "category": "company_services", "subcategory": "destinations",
+    "approval_status": "approved", "approved_by": "project_owner_for_demo", "usage_scope": "demo",
+    "source_type": "project_owner_unverified", "source_reference": "owner_hearsay_2026-08-06",
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": [], "en": []}
+  },
+  {
+    "id": "company_university_selection_001",
+    "question": {"ru": "Какие университеты помогает подобрать компания?", "en": "What types of universities does the company help students select?"},
+    "answer": {
+      "ru": "Компания помогает сформировать список амбициозных, целевых и более безопасных вариантов университетов с учётом профиля студента.",
+      "en": "The company helps students build a list of ambitious, target and safer university options based on the student's profile."
+    },
+    "category": "company_services", "subcategory": "university_selection",
+    "approval_status": "approved", "approved_by": "project_owner_for_demo", "usage_scope": "demo",
+    "source_type": "project_owner_unverified", "source_reference": "owner_hearsay_2026-08-06",
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": [], "en": []}
+  },
+  {
+    "id": "company_language_support_001",
+    "question": {"ru": "Помогает ли компания с языковыми экзаменами?", "en": "Does the company help with language examinations?"},
+    "answer": {
+      "ru": "Компания помогает подготовиться к языковому экзамену либо предоставляет языковой курс. Конкретные экзамены, языки, формат курса и условия оплаты пока требуют подтверждения.",
+      "en": "The company helps students prepare for a language examination or provides a language course. The specific examinations, languages, course format and payment conditions are still awaiting confirmation."
+    },
+    "category": "company_services", "subcategory": "language_support",
+    "approval_status": "approved", "approved_by": "project_owner_for_demo", "usage_scope": "demo",
+    "source_type": "project_owner_unverified", "source_reference": "owner_hearsay_2026-08-06",
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": [], "en": []}
+  },
+  {
+    "id": "company_packages_001",
+    "question": {"ru": "Какие форматы сопровождения предлагает компания?", "en": "What types of service packages does the company offer?"},
+    "answer": {
+      "ru": "Компания предлагает полное сопровождение и отдельные неполные пакеты. Точный состав полного и неполных пакетов пока требует подтверждения.",
+      "en": "The company offers full application support and partial service packages. The exact contents of the full and partial packages are still awaiting confirmation."
+    },
+    "category": "company_package", "subcategory": "packages",
+    "approval_status": "approved", "approved_by": "project_owner_for_demo", "usage_scope": "demo",
+    "source_type": "project_owner_unverified", "source_reference": "owner_hearsay_2026-08-06",
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": [], "en": []}
+  },
+  {
+    "id": "company_pricing_001",
+    "question": {"ru": "Сколько стоит сопровождение?", "en": "How much does the application support service cost?"},
+    "answer": {
+      "ru": "Стоимость сопровождения составляет от 1200 до 1600 евро и зависит от сложности конкретного случая.",
+      "en": "The application support service costs between 1,200 and 1,600 euros, depending on the complexity of the individual case."
+    },
+    "category": "company_pricing", "subcategory": "service_package",
+    "approval_status": "approved", "approved_by": "project_owner_for_demo", "usage_scope": "demo",
+    "source_type": "project_owner_unverified", "source_reference": "owner_hearsay_2026-08-06",
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": [], "en": []}
+  },
+  {
+    "id": "company_pricing_002",
+    "question": {"ru": "Что входит в стоимость?", "en": "What is included in the price?"},
+    "answer": {"ru": "", "en": ""},
+    "category": "company_pricing", "subcategory": "included_in_price",
+    "approval_status": "pending_approval", "approved_by": null, "usage_scope": "production",
+    "source_type": "company_manager", "source_reference": null,
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": [], "en": []}
+  },
+  {
+    "id": "company_pricing_003",
+    "question": {"ru": "Что не входит в стоимость?", "en": "What is not included in the price?"},
+    "answer": {"ru": "", "en": ""},
+    "category": "company_pricing", "subcategory": "excluded_from_price",
+    "approval_status": "pending_approval", "approved_by": null, "usage_scope": "production",
+    "source_type": "company_manager", "source_reference": null,
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": [], "en": []}
+  },
+  {
+    "id": "company_contract_001",
+    "question": {"ru": "Как заключается договор?", "en": "How is the contract concluded?"},
+    "answer": {"ru": "", "en": ""},
+    "category": "company_contract", "subcategory": "contract_process",
+    "approval_status": "pending_approval", "approved_by": null, "usage_scope": "production",
+    "source_type": "company_manager", "source_reference": null,
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": [], "en": []}
+  },
+  {
+    "id": "company_guarantees_001",
+    "question": {"ru": "Какие гарантии предоставляет компания?", "en": "What guarantees does the company provide?"},
+    "answer": {"ru": "", "en": ""},
+    "category": "company_guarantees", "subcategory": "service_guarantees",
+    "approval_status": "pending_approval", "approved_by": null, "usage_scope": "production",
+    "source_type": "company_manager", "source_reference": null,
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": [], "en": []}
+  },
+  {
+    "id": "company_guarantees_002",
+    "question": {"ru": "Гарантируется ли поступление?", "en": "Is admission guaranteed?"},
+    "answer": {"ru": "", "en": ""},
+    "category": "company_guarantees", "subcategory": "admission",
+    "approval_status": "pending_approval", "approved_by": null, "usage_scope": "production",
+    "source_type": "company_manager", "source_reference": null,
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": [], "en": []}
+  },
+  {
+    "id": "company_guarantees_003",
+    "question": {"ru": "Гарантируется ли виза?", "en": "Is the visa guaranteed?"},
+    "answer": {"ru": "", "en": ""},
+    "category": "company_guarantees", "subcategory": "visa",
+    "approval_status": "pending_approval", "approved_by": null, "usage_scope": "production",
+    "source_type": "company_manager", "source_reference": null,
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": [], "en": []}
+  },
+  {
+    "id": "company_guarantees_004",
+    "question": {"ru": "Гарантируется ли стипендия?", "en": "Is the scholarship guaranteed?"},
+    "answer": {"ru": "", "en": ""},
+    "category": "company_guarantees", "subcategory": "scholarship",
+    "approval_status": "pending_approval", "approved_by": null, "usage_scope": "production",
+    "source_type": "company_manager", "source_reference": null,
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": [], "en": []}
+  },
+  {
+    "id": "refund_001",
+    "question": {"ru": "Возможен ли возврат денег?", "en": "Is a refund possible?"},
+    "answer": {"ru": "", "en": ""},
+    "category": "refund", "subcategory": "refund_policy",
+    "approval_status": "pending_approval", "approved_by": null, "usage_scope": "production",
+    "source_type": "company_manager", "source_reference": null,
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": [], "en": []}
+  },
+  {
+    "id": "rejection_support_001",
+    "question": {"ru": "Что происходит при отказе?", "en": "What happens after a rejection?"},
+    "answer": {"ru": "", "en": ""},
+    "category": "rejection_support", "subcategory": "next_steps",
+    "approval_status": "pending_approval", "approved_by": null, "usage_scope": "production",
+    "source_type": "company_manager", "source_reference": null,
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": [], "en": []}
+  },
+  {
+    "id": "onboarding_001",
+    "question": {"ru": "Как начинается сотрудничество?", "en": "How does cooperation begin?"},
+    "answer": {"ru": "", "en": ""},
+    "category": "onboarding", "subcategory": "first_steps",
+    "approval_status": "pending_approval", "approved_by": null, "usage_scope": "production",
+    "source_type": "company_manager", "source_reference": null,
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": [], "en": []}
+  },
+  {
+    "id": "client_responsibilities_001",
+    "question": {"ru": "Какие обязанности у клиента?", "en": "What are the client's responsibilities?"},
+    "answer": {"ru": "", "en": ""},
+    "category": "client_responsibilities", "subcategory": "client_duties",
+    "approval_status": "pending_approval", "approved_by": null, "usage_scope": "production",
+    "source_type": "company_manager", "source_reference": null,
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": [], "en": []}
+  },
+  {
+    "id": "company_responsibilities_001",
+    "question": {"ru": "Какие обязанности у компании?", "en": "What are the company's responsibilities?"},
+    "answer": {"ru": "", "en": ""},
+    "category": "company_responsibilities", "subcategory": "company_duties",
+    "approval_status": "pending_approval", "approved_by": null, "usage_scope": "production",
+    "source_type": "company_manager", "source_reference": null,
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": [], "en": []}
+  },
+  {
+    "id": "manager_contact_hellhg_001",
+    "question": {"ru": "Как связаться с главным менеджером?", "en": "How can I contact the main manager?"},
+    "answer": {
+      "ru": "Связаться с компанией можно через Telegram: @hellhg, @TheLuckiestPersonEver или @maksatuniguide.",
+      "en": "You can contact the company on Telegram: @hellhg, @TheLuckiestPersonEver or @maksatuniguide."
+    },
+    "category": "manager_contact", "subcategory": "main_manager_contact",
+    "approval_status": "approved", "approved_by": "project_owner", "usage_scope": "production",
+    "source_type": "project_owner", "source_reference": "owner_confirmation_2026-08-06",
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": ["Кому написать?"], "en": ["Who can I contact?"]}
+  },
+  {
+    "id": "manager_contact_adakhan_001",
+    "question": {"ru": "Как связаться с компанией?", "en": "How can I contact the company?"},
+    "answer": {
+      "ru": "Связаться с компанией можно через Telegram: @hellhg, @TheLuckiestPersonEver или @maksatuniguide.",
+      "en": "You can contact the company on Telegram: @hellhg, @TheLuckiestPersonEver or @maksatuniguide."
+    },
+    "category": "manager_contact", "subcategory": "telegram_contacts",
+    "approval_status": "approved", "approved_by": "project_owner", "usage_scope": "production",
+    "source_type": "project_owner", "source_reference": "owner_confirmation_2026-08-06",
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": ["Как связаться?"], "en": ["Company contact"]}
+  },
+  {
+    "id": "manager_contact_maksat_001",
+    "question": {"ru": "Кто ваши менеджеры?", "en": "Contacts"},
+    "answer": {
+      "ru": "Связаться с компанией можно через Telegram: @hellhg, @TheLuckiestPersonEver или @maksatuniguide.",
+      "en": "You can contact the company on Telegram: @hellhg, @TheLuckiestPersonEver or @maksatuniguide."
+    },
+    "category": "manager_contact", "subcategory": "telegram_contacts",
+    "approval_status": "approved", "approved_by": "project_owner", "usage_scope": "production",
+    "source_type": "project_owner", "source_reference": "owner_confirmation_2026-08-06",
+    "version": 1, "valid_from": null, "valid_until": null, "updated_at": null,
+    "aliases": {"ru": ["Кто ваши основные контакты?"], "en": ["Who are your managers?"]}
+  }
+]

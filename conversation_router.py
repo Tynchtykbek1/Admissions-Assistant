@@ -31,6 +31,12 @@ _SAFE_DEFINITION = re.compile(
 )
 
 _CATEGORIES = (
+    ("manager_contact", "high", r"\b(?:связат\w*(?:\s+с\s+(?:компани\w*|менеджер\w*))?|контакт\w*|кому\s+написат\w*|кто\s+(?:ваши\s+|главн\w*\s+)?менеджер\w*|contacts?|who\s+can\s+i\s+contact|contact\s+(?:a\s+)?manager)\b"),
+    ("rejection_support", "high", r"\b(?:при\s+отказ\w*|после\s+отказ\w*|what\s+happens\s+(?:after|if).*(?:reject|refus))\b"),
+    ("onboarding", "high", r"\b(?:начина\w*\s+сотрудничеств\w*|начать\s+сотрудничеств\w*|cooperation\s+begin|start\s+working\s+with)\b"),
+    ("client_responsibilities", "high", r"\b(?:обязанност\w*\s+(?:у\s+)?клиент\w*|client(?:'s)?\s+responsibilit)\b"),
+    ("company_responsibilities", "high", r"\b(?:обязанност\w*\s+(?:у\s+)?компани\w*|company(?:'s)?\s+responsibilit)\b"),
+    ("company_package", "high", r"\b(?:какие\s+(?:есть|существуют)\s+пакет\w*|service\s+packages?\s+(?:are\s+)?available)\b"),
     ("refund", "high", r"\b(?:возврат\w*|возвраща\w*|refund\w*)\b"),
     ("company_pricing", "high", r"\b(?:цен[ауы]|стоимост\w*|сто(?:ит|ят|ите|им|ишь)|оплат\w*|тариф\w*|price|cost|payment)\b"),
     ("company_contract", "high", r"\b(?:договор\w*|контракт\w*|contract|agreement)\b"),
@@ -39,7 +45,7 @@ _CATEGORIES = (
     ("scholarship", "high", r"\b(?:стипенди\w*|scholarship\w*|grant\w*)\b"),
     ("documents", "high", r"\b(?:документ\w*|транскрипт\w*|апостил\w*|document\w*|transcript\w*|apostille\w*)\b"),
     ("university_specific", "high", r"\b(?:университет\w*|university|sapienza|bocconi|politecnico|deadline\w*|дедлайн\w*|срок\w*|требовани\w*|requirement\w*)\b"),
-    ("company_services", "medium", r"\b(?:сопровожден\w*|услуг\w*|компани\w*|service\w*|company)\b"),
+    ("company_services", "medium", r"\b(?:сопровожден\w*|услуг\w*|компани\w*|помога\w*|занима\w*|service\w*|company|how\s+do\s+you\s+help)\b"),
     ("admissions_general", "medium", r"\b(?:поступлен\w*|подач\w*|бакалавр\w*|магистрат\w*|admission\w*|application\w*|bachelor\w*|master\w*)\b"),
 )
 

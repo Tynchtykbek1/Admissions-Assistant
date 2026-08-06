@@ -254,6 +254,7 @@ def test_ready_requires_available_system_document_with_chunks(
         "provider_configured": True,
         "system_document_configured": True,
         "system_document_available": True,
+        "demo_mode": False,
     }
 
 

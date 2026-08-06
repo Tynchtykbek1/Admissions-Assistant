@@ -283,7 +283,7 @@ def _log_response(conversation: dict, document: dict | None, route, response: di
         "candidate_count=%d semantic_candidate_count=%d lexical_candidate_count=%d "
         "selected_count=%d selected_faq_ids=%s semantic_scores=%s lexical_scores=%s "
         "final_scores=%s inferred_categories=%s applied_penalties=%s "
-        "retrieval_strategy=%s retrieval_confidence=%.4f",
+        "retrieval_strategy=%s retrieval_confidence=%.4f knowledge_scopes=%s",
         safe_conversation_label(conversation["id"]), document["id"] if document else None,
         route.intent, route.response_mode, route.risk_level, route.is_follow_up,
         route.rewrite_used, len(history), response["retrieval_used"], len(chunks),
@@ -303,6 +303,7 @@ def _log_response(conversation: dict, document: dict | None, route, response: di
         diagnostics.get("applied_penalties", []),
         diagnostics.get("retrieval_strategy", "none" if not response["retrieval_used"] else "semantic_v1"),
         float(diagnostics.get("retrieval_confidence", 0.0)),
+        diagnostics.get("knowledge_scopes", []),
     )
 
 

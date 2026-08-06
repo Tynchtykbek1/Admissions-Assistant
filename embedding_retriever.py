@@ -248,6 +248,11 @@ def find_relevant_chunks_semantic(
             "lexical_scores": [round(candidate.lexical_score, 4) for candidate in result.selected],
             "final_scores": [round(candidate.final_score, 4) for candidate in result.selected],
             "inferred_categories": [list(candidate.inferred_categories) for candidate in result.selected],
+            "knowledge_scopes": sorted({
+                candidate.chunk.get("knowledge_scope")
+                for candidate in result.selected
+                if candidate.chunk.get("knowledge_scope")
+            }),
             "applied_penalties": sorted({
                 penalty
                 for candidate in result.candidates

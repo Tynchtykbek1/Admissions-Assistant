@@ -356,9 +356,10 @@ def count_document_chunks(document_id: int) -> int:
 
 
 def load_document_chunks(document_id: int) -> list[dict]:
+    from knowledge_importer import parse_knowledge_marker
     with closing(get_connection()) as connection:
         document = connection.execute(
-            "SELECT embedding_model_name FROM documents WHERE id = ?",
+            "SELECT embedding_model_name, document_type FROM documents WHERE id = ?",
             (document_id,),
         ).fetchone()
         if document is None:
@@ -378,10 +379,24 @@ def load_document_chunks(document_id: int) -> list[dict]:
             "embedding": json.loads(row["embedding"]),
         }
         if row["faq_id"] is not None:
+            chunk["faq_id"] = row["faq_id"]
+        if row["question"] is not None:
+            chunk["question"] = row["question"]
+        if row["answer"] is not None:
+            chunk["answer"] = row["answer"]
+        marker = (
+            parse_knowledge_marker(row["text_for_retrieval"])
+            if document["document_type"] == "knowledge_pack"
+            else None
+        )
+        if marker:
             chunk.update(
-                faq_id=row["faq_id"],
-                question=row["question"],
-                answer=row["answer"],
+                knowledge_id=marker["id"],
+                knowledge_category=marker["category"],
+                knowledge_version=marker["version"],
+                knowledge_scope=marker.get("usage_scope"),
+                knowledge_source_type=marker.get("source_type"),
+                knowledge_source_reference=marker.get("source_reference"),
             )
         chunks.append(chunk)
 

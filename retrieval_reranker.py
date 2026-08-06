@@ -31,6 +31,8 @@ RETRIEVAL_CATEGORIES = frozenset({
     "visa_fee", "financial_means", "scholarship_amount", "document_cost",
     "visa_guarantee", "scholarship_guarantee", "admission_guarantee",
     "housing_cost",
+    "company_package", "rejection_support", "onboarding",
+    "client_responsibilities", "company_responsibilities", "manager_contact",
 })
 
 _AMOUNT_RE = re.compile(
@@ -162,6 +164,13 @@ class ChunkCategoryClassification:
 
 def classify_chunk_categories(chunk: dict) -> ChunkCategoryClassification:
     """Use FAQ question as primary domain and answer only as secondary context."""
+    explicit = chunk.get("knowledge_category")
+    if explicit in RETRIEVAL_CATEGORIES:
+        secondary_text = " ".join(str(chunk.get(field) or "") for field in ("answer", "text"))
+        return ChunkCategoryClassification(
+            primary=frozenset({explicit}),
+            secondary=_infer_text_categories(secondary_text),
+        )
     question = chunk.get("question")
     if isinstance(question, str) and question.strip():
         primary = _infer_text_categories(question)
@@ -181,7 +190,25 @@ def infer_chunk_categories(chunk: dict) -> frozenset[str]:
 
 
 def infer_query_categories(question: str, intent: str) -> frozenset[str]:
+    explicit_business_intents = {
+        "company_services", "company_package", "rejection_support", "onboarding",
+        "client_responsibilities", "company_responsibilities", "manager_contact",
+        "refund",
+    }
+    if intent in explicit_business_intents:
+        return frozenset({intent})
     text = question.casefold()
+    if (
+        bool(_GUARANTEE_RE.search(text))
+        and _has(text, "компан", "услуг", "пакет", "company", "service")
+        and not _has(text, "поступ", "admission", "виз", "visa", "стипенд", "scholarship")
+    ):
+        return frozenset({"company_guarantees"})
+    if _has(
+        text, "менеджер", "контакт", "кому написать", "связаться с компанией",
+        "manager", "contact", "contacts",
+    ):
+        return frozenset({"manager_contact"})
     company = _has(
         text, "компан", "услуг", "сопровожд", "сервис", "пакет", "помогаете",
         "company", "service", "package", "do you help",
@@ -227,7 +254,7 @@ def infer_query_categories(question: str, intent: str) -> frozenset[str]:
         categories.add("documents_visa")
     elif documents and university:
         categories.add("documents_university")
-    if _has(text, "cent", "cisia", "экзам", "exam"):
+    if _has(text, "cent", "cisia", "экзам", "exam") and not company:
         categories.add("tests")
     tuition = _has(text, "обучен", "учёб", "учебы", "tuition")
     if tuition and price:
@@ -295,7 +322,13 @@ def _compatible(target: frozenset[str], categories: frozenset[str]) -> bool:
         "company_pricing": {"company_pricing"},
         "company_guarantees": {"company_guarantees", "company_contract", "refund"},
         "company_contract": {"company_contract", "refund"},
-        "company_services": {"company_services", "company_contract", "company_pricing"},
+        "company_services": {"company_services", "company_package", "company_contract", "company_pricing"},
+        "company_package": {"company_package", "company_services"},
+        "rejection_support": {"rejection_support"},
+        "onboarding": {"onboarding"},
+        "client_responsibilities": {"client_responsibilities"},
+        "company_responsibilities": {"company_responsibilities"},
+        "manager_contact": {"manager_contact"},
         "documents_visa": {"documents_visa", "financial_means"},
         "documents_university": {"documents_university"},
         "visa": {"visa", "documents_visa"},

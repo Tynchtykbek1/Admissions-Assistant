@@ -4,6 +4,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+import app_settings
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
@@ -170,7 +171,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "demo_mode": app_settings.read_bool("DEMO_MODE", False)}
 
 
 @app.get("/ready")
@@ -202,6 +203,7 @@ def ready():
             "provider_configured": provider_configured,
             "system_document_configured": system_document_configured,
             "system_document_available": system_document_available,
+            "demo_mode": app_settings.read_bool("DEMO_MODE", False),
         },
     )
 

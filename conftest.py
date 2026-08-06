@@ -13,6 +13,7 @@ class _OfflineEmbeddingModel:
 def _prevent_model_downloads(monkeypatch):
     import embedding_model
 
+    monkeypatch.setenv("DIALOGUE_CONTROLLER_LLM", "false")
     embedding_model.load_embedding_model.cache_clear()
     monkeypatch.setattr(
         embedding_model,

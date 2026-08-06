@@ -1,14 +1,16 @@
 import hashlib
 import logging
+import re
 import time
 from collections import OrderedDict
 from threading import Lock
 
 from app_settings import CHAT_HISTORY_CHARACTER_LIMIT, CHAT_HISTORY_LIMIT, DOCUMENT_CACHE_SIZE
-from conversation_router import route_conversation
+from dialogue_controller import build_conversation_state, decide_dialogue
 from conversation_service import SystemDocumentUnavailable, resolve_conversation
 from database import (
     add_message,
+    clear_conversation_messages,
     get_document,
     get_recent_messages,
     load_document_chunks,
@@ -47,6 +49,62 @@ SYSTEM_DOCUMENT_UNAVAILABLE_ANSWER = (
 SAFE_INSUFFICIENT_ANSWERS = {
     "ru": "В подтверждённой базе пока нет информации, которая отвечает на этот вопрос.",
     "en": "The verified knowledge base does not currently contain information that answers this question.",
+}
+
+LOCAL_DIALOGUE_RESPONSES = {
+    "incomplete_message": {
+        "ru": "Похоже, сообщение не закончено. Напишите, пожалуйста, вопрос ещё раз.",
+        "en": "It looks like the message is incomplete. Please send your question again.",
+    },
+    "capability": {
+        "ru": (
+            "Я могу рассказать об услугах компании, странах поступления, стоимости "
+            "сопровождения, пакетах, языковой подготовке, документах, визах, сроках, "
+            "стипендиях и контактах менеджеров. Для точных условий я использую "
+            "подтверждённую базу. Если информации нет, я уточню вопрос или предложу "
+            "связаться с менеджером."
+        ),
+        "en": (
+            "I can help with company services, study destinations, service pricing, "
+            "packages, language preparation, documents, visas, deadlines, scholarships, "
+            "and manager contacts. I use verified information for exact conditions. "
+            "If something is unclear or unavailable, I will clarify the question or "
+            "suggest contacting a manager."
+        ),
+    },
+    "acknowledgement": {"ru": "Хорошо.", "en": "Okay."},
+    "restart": {"ru": "Хорошо, начнём заново. Чем могу помочь?", "en": "Okay, let's start over. How can I help?"},
+    "manager_contact": {
+        "ru": "Связаться с компанией можно через Telegram: @hellhg, @TheLuckiestPersonEver или @maksatuniguide.",
+        "en": "You can contact the company on Telegram: @hellhg, @TheLuckiestPersonEver or @maksatuniguide.",
+    },
+}
+
+INTENT_FALLBACKS = {
+    "company_package_contents": {
+        "ru": "Точный состав пакета пока не подтверждён.",
+        "en": "The exact package contents have not yet been confirmed.",
+    },
+    "company_guarantees": {
+        "ru": "Подтверждённой информации о гарантиях компании пока нет.",
+        "en": "There is currently no confirmed information about company guarantees.",
+    },
+    "refund": {
+        "ru": "Условия возврата денег пока не подтверждены.",
+        "en": "The refund conditions have not yet been confirmed.",
+    },
+    "visa_documents": {
+        "ru": "В базе пока нет полного подтверждённого перечня документов для визы.",
+        "en": "A complete verified list of visa documents is not currently available.",
+    },
+    "manager_contact": {
+        "ru": "Распределение ролей между менеджерами пока не подтверждено.",
+        "en": "The division of roles between managers has not yet been confirmed.",
+    },
+    "language_support": {
+        "ru": "Какие именно языковые экзамены поддерживаются, пока не подтверждено.",
+        "en": "The specific supported language examinations have not yet been confirmed.",
+    },
 }
 
 _document_cache: OrderedDict[int, list[dict]] = OrderedDict()
@@ -160,6 +218,13 @@ def _base_response(
     rewrite_used: bool = False,
     retrieval_used: bool = False,
     final_response_source: str = "deterministic_fallback",
+    active_topic: str | None = None,
+    clarification_question: str | None = None,
+    decision_confidence: float = 0.0,
+    reason_code: str = "legacy_route",
+    entities: dict | None = None,
+    needs_retrieval: bool = False,
+    controller_used: bool = False,
 ) -> dict:
     return {
         "question": question,
@@ -180,6 +245,13 @@ def _base_response(
         "rewrite_used": rewrite_used,
         "retrieval_used": retrieval_used,
         "final_response_source": final_response_source,
+        "active_topic": active_topic,
+        "clarification_question": clarification_question,
+        "decision_confidence": round(float(decision_confidence), 3),
+        "reason_code": reason_code,
+        "entities": entities or {},
+        "needs_retrieval": needs_retrieval,
+        "controller_used": controller_used,
     }
 
 
@@ -225,6 +297,28 @@ def _safe_insufficient_answer(question: str) -> str:
         for character in question
     ) else "en"
     return SAFE_INSUFFICIENT_ANSWERS[language]
+
+
+def _language(question: str) -> str:
+    return "ru" if any("а" <= character.casefold() <= "я" or character in "ёЁ" for character in question) else "en"
+
+
+def _intent_fallback(route, question: str) -> str:
+    language = _language(question)
+    topic = route.active_topic or route.intent
+    return INTENT_FALLBACKS.get(topic, {}).get(language) or (
+        "Подтверждённой информации по этому вопросу пока нет."
+        if language == "ru"
+        else "There is currently no confirmed information for this question."
+    )
+
+
+def _provider_failure_answer(question: str) -> str:
+    return (
+        "Сейчас не удалось получить ответ. Попробуйте ещё раз немного позже."
+        if _language(question) == "ru"
+        else "I couldn't get an answer right now. Please try again a little later."
+    )
 
 
 _MISSING_ASPECT_LABELS = {
@@ -273,11 +367,50 @@ def _append_missing_aspects(answer: str, categories: list[str], question: str) -
     return f"{answer.rstrip()}\n\n{disclosure}"
 
 
+def _sanitize_grounded_answer(answer: str, question: str, chunks) -> str:
+    """Remove user-only numbers and internal implementation wording."""
+    context = " ".join(
+        str(chunk.get("text") or "")
+        for chunk in chunks
+        if isinstance(chunk, dict)
+    )
+    context_digits = re.sub(r"\D", "", context)
+    unsupported_numbers = {
+        re.sub(r"\D", "", token)
+        for token in re.findall(r"(?<!\w)\d[\d\s.,]*", question)
+        if re.sub(r"\D", "", token)
+        and re.sub(r"\D", "", token) not in context_digits
+    }
+    internal_markers = (
+        "в загруженных документах",
+        "в предоставленных документах",
+        "в предоставленном контексте",
+        "retrieval",
+        "chunks",
+        " rag ",
+    )
+    kept: list[str] = []
+    for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", answer.strip()):
+        folded = f" {sentence.casefold()} "
+        if any(marker in folded for marker in internal_markers):
+            continue
+        sentence_numbers = {
+            re.sub(r"\D", "", token)
+            for token in re.findall(r"(?<!\w)\d[\d\s.,]*", sentence)
+        }
+        if unsupported_numbers.intersection(sentence_numbers):
+            continue
+        if sentence.strip():
+            kept.append(sentence.strip())
+    return " ".join(kept)
+
+
 def _log_response(conversation: dict, document: dict | None, route, response: dict, history: list[dict], chunks: list[dict]) -> None:
     diagnostics = getattr(chunks, "diagnostics", {})
     logger.info(
         "chat conversation=%s document_id=%s intent=%s response_mode=%s risk_level=%s "
-        "is_follow_up=%s rewrite_used=%s history_message_count=%d retrieval_used=%s "
+        "active_topic=%s confidence=%.3f needs_retrieval=%s clarification_used=%s "
+        "is_follow_up=%s controller_used=%s rewrite_used=%s history_message_count=%d retrieval_used=%s "
         "context_count=%d faq_ids=%s scores=%s provider=%s status=%s "
         "final_response_source=%s retrieval_ms=%.2f provider_ms=%.2f "
         "candidate_count=%d semantic_candidate_count=%d lexical_candidate_count=%d "
@@ -285,8 +418,11 @@ def _log_response(conversation: dict, document: dict | None, route, response: di
         "final_scores=%s inferred_categories=%s applied_penalties=%s "
         "retrieval_strategy=%s retrieval_confidence=%.4f knowledge_scopes=%s",
         safe_conversation_label(conversation["id"]), document["id"] if document else None,
-        route.intent, route.response_mode, route.risk_level, route.is_follow_up,
-        route.rewrite_used, len(history), response["retrieval_used"], len(chunks),
+        route.intent, route.response_mode, route.risk_level, route.active_topic,
+        route.confidence, route.needs_retrieval,
+        route.response_mode == "clarification", route.is_follow_up,
+        route.controller_used, route.rewrite_used, len(history),
+        response["retrieval_used"], len(chunks),
         [chunk["faq_id"] for chunk in chunks if "faq_id" in chunk],
         [round(chunk["score"], 3) for chunk in chunks], response["provider"],
         response["status"], response["final_response_source"],
@@ -331,7 +467,13 @@ def answer_conversation_question(
 
     history = _bounded_history(get_recent_messages(conversation["id"], CHAT_HISTORY_LIMIT))
     add_message(conversation["id"], "user", question)
-    route = route_conversation(question, history, rewrite_function=rewrite_question)
+    conversation_state = build_conversation_state(history)
+    route = decide_dialogue(
+        question,
+        history,
+        state=conversation_state,
+        language=_language(question),
+    )
 
     active_document_id = conversation["active_document_id"]
     document = get_document(active_document_id) if active_document_id else None
@@ -345,9 +487,41 @@ def answer_conversation_question(
         "risk_level": route.risk_level,
         "is_follow_up": route.is_follow_up,
         "rewrite_used": route.rewrite_used,
+        "active_topic": route.active_topic,
+        "clarification_question": route.clarification_question,
+        "decision_confidence": route.confidence,
+        "reason_code": route.reason_code,
+        "entities": route.entities,
+        "needs_retrieval": route.needs_retrieval,
+        "controller_used": route.controller_used,
     }
 
-    if route.response_mode in {"conversational", "safe_general"}:
+    if route.response_mode in {"local_response", "clarification"}:
+        language = _language(question)
+        if route.response_mode == "clarification":
+            answer = route.clarification_question or _intent_fallback(route, question)
+        else:
+            if route.intent == "restart":
+                clear_conversation_messages(conversation["id"])
+            answer = (
+                INTENT_FALLBACKS["manager_contact"][language]
+                if route.reason_code == "unconfirmed_manager_roles"
+                else LOCAL_DIALOGUE_RESPONSES.get(route.intent, {}).get(language)
+            )
+            if answer is None:
+                answer = _deterministic_conversational(route.intent, question) or (
+                    "Чем могу помочь?" if language == "ru" else "How can I help?"
+                )
+        add_message(conversation["id"], "assistant", answer)
+        response = _base_response(
+            answer=answer, status=SUCCESS, sources=[], provider="local",
+            provider_duration_ms=0.0, retrieval_duration_ms=0.0,
+            retrieval_used=False, final_response_source="local_response", **common,
+        )
+        _log_response(conversation, document, route, response, history, [])
+        return response
+
+    if route.response_mode in {"conversational", "general_knowledge"}:
         deterministic = (
             _deterministic_conversational(route.intent, question)
             if route.response_mode == "conversational"
@@ -360,6 +534,8 @@ def answer_conversation_question(
             generator = generate_conversational_answer if route.response_mode == "conversational" else generate_safe_general_answer
             result = generator(question, history=history)
             answer, status, provider, provider_ms = result.answer, result.status, result.provider, result.provider_duration_ms
+            if status == PROVIDER_UNAVAILABLE:
+                answer = _provider_failure_answer(question)
             final_source = (
                 f"llm_{route.response_mode}" if result.status != PROVIDER_UNAVAILABLE
                 else "provider_unavailable"
@@ -390,9 +566,10 @@ def answer_conversation_question(
         return response
 
     if document is None:
-        add_message(conversation["id"], "assistant", NO_ACTIVE_DOCUMENT_ANSWER)
+        no_document_answer = _intent_fallback(route, question)
+        add_message(conversation["id"], "assistant", no_document_answer)
         response = _base_response(
-            answer=NO_ACTIVE_DOCUMENT_ANSWER,
+            answer=no_document_answer,
             status=INSUFFICIENT_DOCUMENT_INFORMATION,
             sources=[],
             provider="unconfigured",
@@ -426,7 +603,7 @@ def answer_conversation_question(
             reason="no_relevant_chunks",
             relevant_chunks=relevant_chunks,
         )
-        safe_answer = _safe_insufficient_answer(route.standalone_question)
+        safe_answer = _intent_fallback(route, route.standalone_question)
         add_message(conversation["id"], "assistant", safe_answer)
         response = _base_response(
             answer=safe_answer,
@@ -445,6 +622,7 @@ def answer_conversation_question(
             relevant_chunks,
             standalone_question=route.standalone_question,
             history=history,
+            response_mode=route.response_mode,
         )
         if result.status == INSUFFICIENT_DOCUMENT_INFORMATION:
             _record_unanswered_safely(
@@ -454,13 +632,21 @@ def answer_conversation_question(
                 relevant_chunks=relevant_chunks,
             )
         answer = (
-            _safe_insufficient_answer(route.standalone_question)
+            _intent_fallback(route, route.standalone_question)
             if result.status == INSUFFICIENT_DOCUMENT_INFORMATION
-            else result.answer
+            else (_provider_failure_answer(question) if result.status == PROVIDER_UNAVAILABLE else result.answer)
         )
+        if result.status not in {INSUFFICIENT_DOCUMENT_INFORMATION, PROVIDER_UNAVAILABLE}:
+            answer = _sanitize_grounded_answer(answer, question, relevant_chunks)
+            if not answer:
+                answer = _intent_fallback(route, route.standalone_question)
+                result_status = INSUFFICIENT_DOCUMENT_INFORMATION
+            else:
+                result_status = result.status
+        else:
+            result_status = result.status
         diagnostics = getattr(relevant_chunks, "diagnostics", {})
         missing_categories = diagnostics.get("missing_query_categories", [])
-        result_status = result.status
         if missing_categories and result_status in {SUCCESS, PARTIAL_INFORMATION}:
             result_status = PARTIAL_INFORMATION
             answer = _append_missing_aspects(
@@ -482,7 +668,7 @@ def answer_conversation_question(
             retrieval_duration_ms=retrieval_duration_ms,
             retrieval_used=True,
             final_response_source=(
-                "llm_verified_rag" if result.status != PROVIDER_UNAVAILABLE
+                ("llm_mixed" if route.response_mode == "mixed" else "llm_verified_rag") if result.status != PROVIDER_UNAVAILABLE
                 else "provider_unavailable"
             ),
             **common,

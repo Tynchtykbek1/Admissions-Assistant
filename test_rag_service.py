@@ -42,7 +42,7 @@ def success_result(answer: str, status: str = "success") -> LLMAnswerResult:
     return LLMAnswerResult(status, answer, "gemini", 1.0)
 
 
-def test_retrieval_uses_rewritten_standalone_question(isolated_database):
+def test_retrieval_uses_controller_resolved_question(isolated_database):
     document_id = add_document("guide.txt", "Напишите менеджеру для договора.")
     conversation = database.get_or_create_conversation(
         "telegram", "chat", "user", default_document_id=document_id
@@ -51,13 +51,7 @@ def test_retrieval_uses_rewritten_standalone_question(isolated_database):
     database.add_message(
         conversation["id"], "assistant", "Заключить договор с менеджером."
     )
-    rewritten = "Кому написать для заключения договора?"
-
     with (
-        patch(
-            "rag_service.rewrite_question",
-            return_value=RewriteResult(rewritten, True),
-        ),
         patch(
             "rag_service.find_relevant_chunks_semantic",
             return_value=[{
@@ -79,8 +73,9 @@ def test_retrieval_uses_rewritten_standalone_question(isolated_database):
             external_user_id="user",
         )
 
-    assert retrieval.call_args.kwargs["question"] == rewritten
-    assert response["standalone_question"] == rewritten
+    assert "менеджер" in retrieval.call_args.kwargs["question"].casefold()
+    assert response["is_follow_up"] is True
+    assert response["controller_used"] is False
 
 
 def test_no_relevant_chunks_skips_answer_provider(isolated_database):
@@ -234,7 +229,7 @@ def test_small_talk_skips_semantic_retrieval(isolated_database):
             external_user_id="user",
         )
     retrieval.assert_not_called()
-    assert response["response_mode"] == "conversational"
+    assert response["response_mode"] == "local_response"
     assert response["status"] == "success"
     assert "загруж" not in response["answer"].casefold()
 
@@ -249,7 +244,7 @@ def test_safe_general_can_answer_without_document_or_retrieval(isolated_database
             external_user_id="user",
         )
     retrieval.assert_not_called()
-    assert response["response_mode"] == "safe_general"
+    assert response["response_mode"] == "general_knowledge"
     assert response["status"] == "success"
 
 

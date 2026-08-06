@@ -28,18 +28,12 @@ LOCAL_RESPONSES = {
     },
     "manager": {
         "ru": (
-            "По вопросам поступления вы можете связаться с менеджерами:\n\n"
-            "• Адахан — @TheLuckiestPersonEver\n"
-            "• Максат — @maksatuniguide\n\n"
-            "Напишите им в Telegram, если в базе знаний нет ответа на ваш вопрос "
-            "или вам нужна консультация."
+            "Связаться с компанией можно через Telegram: "
+            "@hellhg, @TheLuckiestPersonEver или @maksatuniguide."
         ),
         "en": (
-            "For admissions assistance, you can contact the managers:\n\n"
-            "• Adakhan — @TheLuckiestPersonEver\n"
-            "• Maksat — @maksatuniguide\n\n"
-            "You can message them on Telegram if the knowledge base does not "
-            "contain the answer or if you need personal assistance."
+            "You can contact the company on Telegram: "
+            "@hellhg, @TheLuckiestPersonEver or @maksatuniguide."
         ),
     },
     "out_of_scope": {

@@ -225,9 +225,9 @@ def test_safe_routes_do_not_require_available_system_document(tmp_path, monkeypa
             "external_user_id": "user",
         })
     assert greeting.status_code == 200
-    assert greeting.json()["response_mode"] == "conversational"
+    assert greeting.json()["response_mode"] == "local_response"
     assert definition.status_code == 200
-    assert definition.json()["response_mode"] == "safe_general"
+    assert definition.json()["response_mode"] == "general_knowledge"
     assert verified.status_code == 503
     assert verified.json()["status"] == "system_document_unavailable"
 

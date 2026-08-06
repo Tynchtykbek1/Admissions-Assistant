@@ -64,7 +64,7 @@ def _provider_result(status: str) -> LLMAnswerResult:
     )
 
 
-def test_zero_retrieval_and_equivalent_repeat_create_one_record(
+def test_ambiguous_documents_clarify_without_unanswered_record(
     unanswered_database,
 ):
     rewrites = [
@@ -80,15 +80,10 @@ def test_zero_retrieval_and_equivalent_repeat_create_one_record(
         second = _ask(unanswered_database, "А какие документы?")
 
     provider.assert_not_called()
-    assert first["status"] == second["status"] == (
-        "insufficient_document_information"
-    )
+    assert first["status"] == second["status"] == "success"
+    assert first["response_mode"] == second["response_mode"] == "clarification"
     rows = database.list_unanswered_questions(["open"])
-    assert len(rows) == 1
-    assert rows[0]["question"] == "Какие документы нужны?"
-    assert rows[0]["occurrence_count"] == 2
-    assert rows[0]["reason"] == "no_relevant_chunks"
-    assert rows[0]["max_similarity_score"] is None
+    assert rows == []
 
 
 def test_llm_insufficient_result_records_retrieval_metadata(unanswered_database):

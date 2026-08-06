@@ -232,9 +232,9 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_manager_contacts_are_exact_and_safe_for_html_mode(self):
-        for text, language, names in (
-            ("Кто твой менеджер?", "ru", ("Адахан", "Максат")),
-            ("Who is your manager?", "en", ("Adakhan", "Maksat")),
+        for text, language in (
+            ("Кто твой менеджер?", "ru"),
+            ("Who is your manager?", "en"),
         ):
             update = make_update(text)
             await handle_question(update, SimpleNamespace(chat_data={}))
@@ -242,7 +242,7 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(sent.kwargs["parse_mode"], ParseMode.HTML)
             self.assertIn("@TheLuckiestPersonEver", sent.args[0])
             self.assertIn("@maksatuniguide", sent.args[0])
-            self.assertTrue(all(name in sent.args[0] for name in names))
+            self.assertIn("@hellhg", sent.args[0])
             self.assertNotIn("<", sent.args[0])
             self.assertNotIn(">", sent.args[0])
 

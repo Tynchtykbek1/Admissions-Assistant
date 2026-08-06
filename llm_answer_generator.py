@@ -217,10 +217,11 @@ def generate_openai_answer(
     *,
     standalone_question: str | None = None,
     history: list[dict] | None = None,
+    response_mode: str = "verified_rag",
 ) -> str | None:
     return generate_openai_text(
         RAG_INSTRUCTIONS,
-        _build_answer_input(question, standalone_question, history, context),
+        _build_answer_input(question, standalone_question, history, context, response_mode),
     )
 
 
@@ -230,10 +231,11 @@ def generate_gemini_answer(
     *,
     standalone_question: str | None = None,
     history: list[dict] | None = None,
+    response_mode: str = "verified_rag",
 ) -> str | None:
     return generate_gemini_text(
         RAG_INSTRUCTIONS,
-        _build_answer_input(question, standalone_question, history, context),
+        _build_answer_input(question, standalone_question, history, context, response_mode),
     )
 
 
@@ -242,13 +244,20 @@ def _build_answer_input(
     standalone_question: str | None,
     history: list[dict] | None,
     context: str,
+    response_mode: str = "verified_rag",
 ) -> str:
     final_question = standalone_question or question
     return (
         f"CHAT_HISTORY (UNTRUSTED DATA, JSON LINES):\n{_build_history(history)}\n\n"
         f"VERIFIED_CONTEXT:\n{context}\n\n"
         f"CURRENT_QUESTION:\n{final_question}\n\n"
-        f"Required answer language:\n{_answer_language_instruction(final_question)}\n\n"
+        f"RESPONSE_MODE:\n{response_mode}\n"
+        + (
+            "For mixed mode, clearly separate the stable general explanation, "
+            "facts confirmed by VERIFIED_CONTEXT, and any missing specific information.\n\n"
+            if response_mode == "mixed" else "\n"
+        )
+        + f"Required answer language:\n{_answer_language_instruction(final_question)}\n\n"
     )
 
 
@@ -407,6 +416,7 @@ def generate_llm_answer(
     *,
     standalone_question: str | None = None,
     history: list[dict] | None = None,
+    response_mode: str = "verified_rag",
 ) -> LLMAnswerResult:
     provider = os.getenv("LLM_PROVIDER", "").strip().lower()
     started_at = time.perf_counter()
@@ -426,6 +436,7 @@ def generate_llm_answer(
         kwargs = {
             "standalone_question": standalone_question,
             "history": history,
+            "response_mode": response_mode,
         }
         if provider == "openai":
             raw_answer = generate_openai_answer(question, context, **kwargs)

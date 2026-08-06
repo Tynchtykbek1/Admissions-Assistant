@@ -24,7 +24,9 @@ RETRIEVAL_QUERY_REPLACEMENTS = (
     (r"(?<!\w)стипендия(?!\w)|(?<!\w)scholarship(?!\w)", r"\g<0> стипендия scholarship"),
     (r"(?<!\w)рекомендация(?!\w)|(?<!\w)рекомендательное\s+письмо(?!\w)", r"\g<0> рекомендательное письмо"),
     (r"(?<!\w)мотивационное\s+письмо(?!\w)", r"\g<0> motivation letter"),
-    (r"(?<!\w)стоимость(?!\w)|(?<!\w)оплата(?!\w)|(?<!\w)контракт(?!\w)", r"\g<0> стоимость обучения оплата обучения контракт"),
+    # Do not expand every price/payment query toward tuition: that caused
+    # company-service questions to retrieve neighbouring university fees.
+    (r"(?<!\w)стоимость\s+обучения(?!\w)|(?<!\w)оплата\s+обучения(?!\w)", r"\g<0> tuition fee payment"),
     (r"(?<!\w)зачисление(?!\w)", r"\g<0> поступление enrollment"),
     (r"(?<!\w)application\s+period(?!\w)|(?<!\w)when\s+can\s+i\s+apply(?!\w)", r"\g<0> application deadlines application period"),
     (r"(?<!\w)deadlines?(?!\w)", r"\g<0> application period submission deadline"),
@@ -204,9 +206,60 @@ def find_relevant_chunks_semantic(
     min_context_chunks: int = 0,
     fallback_score_threshold: float | None = None,
     context_score_margin: float = 0.12,
+    intent: str | None = None,
+    risk_level: str = "medium",
 ) -> list[dict]:
     if not chunks:
         return []
+
+    # Existing callers retain semantic-only behavior. Conversation routing
+    # supplies an intent and activates Retrieval v2 through this compatible API.
+    if intent is not None:
+        from retrieval_reranker import (
+            covered_query_categories,
+            infer_query_categories,
+            retrieve_relevant_chunks,
+        )
+
+        result = retrieve_relevant_chunks(
+            question,
+            chunks,
+            intent=intent,
+            risk_level=risk_level,
+            top_k=top_k,
+        )
+        relevant = RetrievalChunkList(result.chunks)
+        query_categories = infer_query_categories(question, intent)
+        covered_categories = covered_query_categories(query_categories, result.selected)
+        relevant.diagnostics = {
+            "candidate_count": len(result.candidates),
+            "max_candidate_semantic_score": max(
+                (candidate.semantic_score for candidate in result.candidates),
+                default=None,
+            ),
+            "semantic_candidate_count": result.semantic_candidate_count,
+            "lexical_candidate_count": result.lexical_candidate_count,
+            "selected_count": len(result.selected),
+            "selected_faq_ids": [
+                candidate.chunk.get("faq_id") for candidate in result.selected
+                if candidate.chunk.get("faq_id") is not None
+            ],
+            "semantic_scores": [round(candidate.semantic_score, 4) for candidate in result.selected],
+            "lexical_scores": [round(candidate.lexical_score, 4) for candidate in result.selected],
+            "final_scores": [round(candidate.final_score, 4) for candidate in result.selected],
+            "inferred_categories": [list(candidate.inferred_categories) for candidate in result.selected],
+            "applied_penalties": sorted({
+                penalty
+                for candidate in result.candidates
+                for penalty in candidate.penalties
+            }),
+            "retrieval_strategy": result.retrieval_strategy,
+            "retrieval_confidence": result.retrieval_confidence,
+            "query_categories": sorted(query_categories),
+            "covered_query_categories": sorted(covered_categories),
+            "missing_query_categories": sorted(query_categories - covered_categories),
+        }
+        return relevant
 
     ranked_candidates = build_retrieval_diagnostics(question, chunks)
     eligible_candidates = []
@@ -272,3 +325,9 @@ def find_relevant_chunks_semantic(
             break
 
     return relevant_chunks
+
+
+class RetrievalChunkList(list):
+    """List-compatible selected context carrying safe internal diagnostics."""
+
+    diagnostics: dict

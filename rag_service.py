@@ -116,6 +116,10 @@ def _record_unanswered_safely(
         for chunk in relevant_chunks
         if chunk.get("score") is not None
     ]
+    diagnostics = getattr(relevant_chunks, "diagnostics", {})
+    max_similarity_score = (
+        max(scores) if scores else diagnostics.get("max_candidate_semantic_score")
+    )
     faq_ids = sorted(
         {
             int(chunk["faq_id"])
@@ -128,7 +132,7 @@ def _record_unanswered_safely(
             question=question,
             standalone_question=standalone_question,
             reason=reason,
-            max_similarity_score=max(scores) if scores else None,
+            max_similarity_score=max_similarity_score,
             retrieved_faq_ids=faq_ids,
         )
     except Exception:
@@ -223,12 +227,63 @@ def _safe_insufficient_answer(question: str) -> str:
     return SAFE_INSUFFICIENT_ANSWERS[language]
 
 
+_MISSING_ASPECT_LABELS = {
+    "ru": {
+        "company_pricing": "цене услуг компании",
+        "company_guarantees": "гарантиях компании",
+        "company_services": "составе услуг компании",
+        "tuition": "стоимости обучения",
+        "visa_fee": "визовых расходах",
+        "admission_guarantee": "гарантии поступления",
+        "scholarship_guarantee": "гарантии стипендии",
+        "visa_guarantee": "гарантии визы",
+    },
+    "en": {
+        "company_pricing": "the company's service price",
+        "company_guarantees": "company guarantees",
+        "company_services": "the scope of company services",
+        "tuition": "tuition costs",
+        "visa_fee": "visa expenses",
+        "admission_guarantee": "an admission guarantee",
+        "scholarship_guarantee": "a scholarship guarantee",
+        "visa_guarantee": "a visa guarantee",
+    },
+}
+
+
+def _append_missing_aspects(answer: str, categories: list[str], question: str) -> str:
+    """Make deterministic partial coverage explicit without adding factual claims."""
+    language = "ru" if any(
+        "а" <= character.casefold() <= "я" or character in "ёЁ"
+        for character in question
+    ) else "en"
+    labels = [
+        _MISSING_ASPECT_LABELS[language].get(category, category.replace("_", " "))
+        for category in categories
+    ]
+    if language == "ru":
+        disclosure = (
+            "В подтверждённой базе нет информации о " + " и ".join(labels) + "."
+        )
+    else:
+        disclosure = (
+            "The verified knowledge base does not contain information about "
+            + " and ".join(labels) + "."
+        )
+    return f"{answer.rstrip()}\n\n{disclosure}"
+
+
 def _log_response(conversation: dict, document: dict | None, route, response: dict, history: list[dict], chunks: list[dict]) -> None:
+    diagnostics = getattr(chunks, "diagnostics", {})
     logger.info(
         "chat conversation=%s document_id=%s intent=%s response_mode=%s risk_level=%s "
         "is_follow_up=%s rewrite_used=%s history_message_count=%d retrieval_used=%s "
         "context_count=%d faq_ids=%s scores=%s provider=%s status=%s "
-        "final_response_source=%s retrieval_ms=%.2f provider_ms=%.2f",
+        "final_response_source=%s retrieval_ms=%.2f provider_ms=%.2f "
+        "candidate_count=%d semantic_candidate_count=%d lexical_candidate_count=%d "
+        "selected_count=%d selected_faq_ids=%s semantic_scores=%s lexical_scores=%s "
+        "final_scores=%s inferred_categories=%s applied_penalties=%s "
+        "retrieval_strategy=%s retrieval_confidence=%.4f",
         safe_conversation_label(conversation["id"]), document["id"] if document else None,
         route.intent, route.response_mode, route.risk_level, route.is_follow_up,
         route.rewrite_used, len(history), response["retrieval_used"], len(chunks),
@@ -236,6 +291,18 @@ def _log_response(conversation: dict, document: dict | None, route, response: di
         [round(chunk["score"], 3) for chunk in chunks], response["provider"],
         response["status"], response["final_response_source"],
         response["retrieval_duration_ms"], response["provider_duration_ms"],
+        diagnostics.get("candidate_count", len(chunks)),
+        diagnostics.get("semantic_candidate_count", len(chunks)),
+        diagnostics.get("lexical_candidate_count", 0),
+        diagnostics.get("selected_count", len(chunks)),
+        diagnostics.get("selected_faq_ids", [chunk.get("faq_id") for chunk in chunks if chunk.get("faq_id") is not None]),
+        diagnostics.get("semantic_scores", [round(chunk["score"], 3) for chunk in chunks]),
+        diagnostics.get("lexical_scores", [round(chunk.get("lexical_score", 0.0), 3) for chunk in chunks]),
+        diagnostics.get("final_scores", [round(chunk.get("final_score", chunk["score"]), 3) for chunk in chunks]),
+        diagnostics.get("inferred_categories", [chunk.get("inferred_categories", []) for chunk in chunks]),
+        diagnostics.get("applied_penalties", []),
+        diagnostics.get("retrieval_strategy", "none" if not response["retrieval_used"] else "semantic_v1"),
+        float(diagnostics.get("retrieval_confidence", 0.0)),
     )
 
 
@@ -346,6 +413,8 @@ def answer_conversation_question(
         min_score=SEMANTIC_SCORE_THRESHOLD,
         fallback_score_threshold=SEMANTIC_FALLBACK_SCORE_THRESHOLD,
         context_score_margin=CONTEXT_SCORE_MARGIN,
+        intent=route.intent,
+        risk_level=route.risk_level,
     )
     retrieval_duration_ms = (time.perf_counter() - retrieval_started_at) * 1000
 
@@ -354,13 +423,12 @@ def answer_conversation_question(
             question=question,
             standalone_question=route.standalone_question,
             reason="no_relevant_chunks",
-            relevant_chunks=[],
+            relevant_chunks=relevant_chunks,
         )
-        add_message(
-            conversation["id"], "assistant", INSUFFICIENT_INFORMATION_ANSWER
-        )
+        safe_answer = _safe_insufficient_answer(route.standalone_question)
+        add_message(conversation["id"], "assistant", safe_answer)
         response = _base_response(
-            answer=INSUFFICIENT_INFORMATION_ANSWER,
+            answer=safe_answer,
             status=INSUFFICIENT_DOCUMENT_INFORMATION,
             sources=[],
             provider="unconfigured",
@@ -389,16 +457,24 @@ def answer_conversation_question(
             if result.status == INSUFFICIENT_DOCUMENT_INFORMATION
             else result.answer
         )
+        diagnostics = getattr(relevant_chunks, "diagnostics", {})
+        missing_categories = diagnostics.get("missing_query_categories", [])
+        result_status = result.status
+        if missing_categories and result_status in {SUCCESS, PARTIAL_INFORMATION}:
+            result_status = PARTIAL_INFORMATION
+            answer = _append_missing_aspects(
+                answer, missing_categories, route.standalone_question
+            )
         sources = (
             build_sources(relevant_chunks)
-            if result.status in {SUCCESS, PARTIAL_INFORMATION}
+            if result_status in {SUCCESS, PARTIAL_INFORMATION}
             else []
         )
         if result.status != PROVIDER_UNAVAILABLE:
             add_message(conversation["id"], "assistant", answer)
         response = _base_response(
             answer=answer,
-            status=result.status,
+            status=result_status,
             sources=sources,
             provider=result.provider,
             provider_duration_ms=result.provider_duration_ms,

@@ -1,0 +1,23 @@
+[
+  {"question":"Сколько стоят ваши услуги?","expected_query_categories":["company_pricing"],"allowed_faq_ids":[],"forbidden_faq_ids":[6,24,37,38,42],"allow_empty":true},
+  {"question":"Какая цена сопровождения?","expected_query_categories":["company_pricing"],"allowed_faq_ids":[],"forbidden_faq_ids":[6,24,37,38,42],"allow_empty":true},
+  {"question":"Что входит в стоимость ваших услуг?","expected_query_categories":["company_pricing"],"allowed_faq_ids":[],"forbidden_faq_ids":[6,24,37,38,42],"allow_empty":true},
+  {"question":"Какие гарантии предоставляет компания?","expected_query_categories":["company_guarantees"],"allowed_faq_ids":[],"forbidden_faq_ids":[1,2,30,33],"allow_empty":true},
+  {"question":"Возвращаете ли вы деньги?","expected_query_categories":["refund"],"allowed_faq_ids":[],"forbidden_faq_ids":[10,19,43],"allow_empty":true},
+  {"question":"Гарантирована ли стипендия?","expected_query_categories":["scholarship_guarantee"],"allowed_faq_ids":[1],"forbidden_faq_ids":[2,5,30,33,36],"allow_empty":false},
+  {"question":"Гарантирована ли виза?","expected_query_categories":["visa_guarantee"],"allowed_faq_ids":[2,33],"forbidden_faq_ids":[1,12,15,30,35],"allow_empty":false},
+  {"question":"Гарантировано ли поступление?","expected_query_categories":["admission_guarantee"],"allowed_faq_ids":[],"forbidden_faq_ids":[1,2,3,31],"allow_empty":true},
+  {"question":"Сколько стоит обучение?","expected_query_categories":["tuition"],"allowed_faq_ids":[],"forbidden_faq_ids":[6,24,37,38,42],"allow_empty":true},
+  {"question":"Сколько стоит CEnT?","expected_query_categories":["tests"],"allowed_faq_ids":[24],"forbidden_faq_ids":[6,37,38,42],"allow_empty":false},
+  {"question":"Сколько стоит виза?","expected_query_categories":["visa_fee"],"allowed_faq_ids":[42],"forbidden_faq_ids":[6,24,37,38],"allow_empty":false},
+  {"question":"Сколько стоит проживание?","expected_query_categories":["housing_cost"],"allowed_faq_ids":[],"forbidden_faq_ids":[6,24,37,38,39,42],"allow_empty":true},
+  {"question":"Какие документы нужны для визы?","expected_query_categories":["documents_visa"],"allowed_faq_ids":[10,16,17,21,25,30,34,43],"forbidden_faq_ids":[19,20,23,36,40,41],"allow_empty":true},
+  {"question":"Какие документы нужны для университета?","expected_query_categories":["documents_university"],"allowed_faq_ids":[20,23,25,28,41],"forbidden_faq_ids":[10,16,17,21,30,34,43],"allow_empty":false},
+  {"question":"Какие документы нужны для поступления?","expected_query_categories":["documents_university"],"allowed_faq_ids":[20,23,25,28,41],"forbidden_faq_ids":[10,16,17,21,30,34,43],"allow_empty":false},
+  {"question":"Когда дедлайн?","expected_query_categories":["deadline"],"allowed_faq_ids":[3,22,31],"forbidden_faq_ids":[7,14,35],"allow_empty":false},
+  {"question":"Когда можно подавать документы?","expected_query_categories":["deadline"],"allowed_faq_ids":[3,22,31],"forbidden_faq_ids":[4,19,28,40,43],"allow_empty":false},
+  {"question":"IELTS нужен?","expected_query_categories":["language_requirement"],"allowed_faq_ids":[11],"forbidden_faq_ids":[20,24,26,41],"allow_empty":true},
+  {"question":"Что входит в сопровождение?","expected_query_categories":["company_services"],"allowed_faq_ids":[4,8,9,19],"forbidden_faq_ids":[3,24,27,41],"allow_empty":false},
+  {"question":"Как заключается договор?","expected_query_categories":["company_contract"],"allowed_faq_ids":[],"forbidden_faq_ids":[3,9,41],"allow_empty":true},
+  {"question":"Сколько денег должно быть на счёте?","expected_query_categories":["financial_means"],"allowed_faq_ids":[10,21,43],"forbidden_faq_ids":[6,24,37,38,42],"allow_empty":false}
+]

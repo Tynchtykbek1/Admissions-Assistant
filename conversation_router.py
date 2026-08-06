@@ -31,7 +31,8 @@ _SAFE_DEFINITION = re.compile(
 )
 
 _CATEGORIES = (
-    ("company_pricing", "high", r"\b(?:цен[ауы]|стоимост\w*|сто(?:ит|ят|ите|им|ишь)|оплат\w*|тариф\w*|refund|price|cost|payment|возврат\w*)\b"),
+    ("refund", "high", r"\b(?:возврат\w*|возвраща\w*|refund\w*)\b"),
+    ("company_pricing", "high", r"\b(?:цен[ауы]|стоимост\w*|сто(?:ит|ят|ите|им|ишь)|оплат\w*|тариф\w*|price|cost|payment)\b"),
     ("company_contract", "high", r"\b(?:договор\w*|контракт\w*|contract|agreement)\b"),
     ("company_guarantees", "high", r"\b(?:гаранти\w*|guarantee\w*)\b"),
     ("visa", "high", r"\b(?:виз\w*|visa\w*)\b"),

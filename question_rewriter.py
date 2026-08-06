@@ -30,6 +30,7 @@ ADMISSIONS_SUBJECT_PATTERNS = (
     r"apostille|scholarship\w*|recommendation|motivation|tuition|enrollment)\b",
 )
 UNRESOLVED_REFERENCE_PATTERNS = (
+    r"^(?:а\s+)?(?:вместе\s+с\s+.+|.+\s+сюда\s+входит|.+\s+по\s+(?:этому|этому\s+же)\s+пакету)\??$",
     r"\b(?:это|этот|эта|эту|эти|них|ними|потом|после\s+этого|эта\s+цена|эту\s+цену)\b",
     r"^(?:а\s+)?(?:какие\s+гарантии|какие\s+документы|документы|для\s+магистратуры|что\s+дальше|куда\s+потом\s+подавать|"
     r"это\s+обязательно|какие\s+именно|что\s+из\s+них|если\s+откажут|после\s+этого|сколько\s+это\s+занимает)\??$",
@@ -46,6 +47,7 @@ UNRESOLVED_REFERENCE_PATTERNS = (
     r"\b(?:it|this|that|these|those|they|them|there|then)\b",
 )
 QUALIFIED_CONNECTOR_PATTERNS = (
+    r"^(?:а\s+)?(?:вместе\s+с\s+.+|.+\s+сюда\s+входит)\??$",
     r"^(?:а|и)\s+(?:сроки|для визы|раньше можно|на каком языке|после приезда|сколько)\??$",
     r"^(?:what about)\s+(?:the\s+)?(?:visa|deadline|after arrival)\??$",
     r"^(?:and)\s+(?:the\s+)?deadline\??$",

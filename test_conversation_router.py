@@ -27,6 +27,13 @@ def test_company_commercial_questions_are_high_risk_verified(question, intent):
     assert route.risk_level == "high"
 
 
+def test_refund_question_is_high_risk_verified():
+    route = route_conversation("Возвращаете ли вы деньги?", [])
+    assert route.intent == "refund"
+    assert route.response_mode == "verified_rag"
+    assert route.risk_level == "high"
+
+
 @pytest.mark.parametrize("question", [
     "Что такое бакалавриат?",
     "What is a bachelor's degree?",

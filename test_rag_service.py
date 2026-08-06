@@ -404,3 +404,107 @@ def test_llm_insufficient_answer_does_not_echo_injected_price(isolated_database)
             external_user_id="user",
         )
     assert "500" not in response["answer"]
+
+
+def test_retrieval_v2_no_compatible_pricing_context_skips_final_llm(
+    isolated_database,
+):
+    chunks = [
+        {
+            "chunk_id": 1, "faq_id": 42, "filename": "faq.txt",
+            "question": "Сколько стоит податься на визу?",
+            "answer": "Визовый сбор составляет 85 евро.",
+            "text": "Визовый сбор составляет 85 евро.",
+            "text_for_retrieval": "Сколько стоит податься на визу? Визовый сбор составляет 85 евро.",
+            "embedding": np.array([0.99, 0.0]),
+        },
+        {
+            "chunk_id": 2, "faq_id": 24, "filename": "faq.txt",
+            "question": "Сколько стоит CEnT?", "answer": "CEnT стоит 55 евро.",
+            "text": "CEnT стоит 55 евро.",
+            "text_for_retrieval": "Сколько стоит CEnT? CEnT стоит 55 евро.",
+            "embedding": np.array([0.98, 0.0]),
+        },
+    ]
+    document_id = database.insert_document_with_chunks(
+        "faq.txt", "stored-faq.txt", "faq", database.get_embedding_model_name(), chunks,
+    )
+    conversation = database.get_or_create_conversation(
+        "telegram", "retrieval-v2-empty", "user", default_document_id=document_id
+    )
+
+    class QueryModel:
+        def encode(self, _text, normalize_embeddings=True):
+            return np.array([1.0, 0.0])
+
+    with (
+        patch("embedding_retriever.get_embedding_model", return_value=QueryModel()),
+        patch("rag_service.generate_llm_answer") as provider,
+    ):
+        response = rag_service.answer_conversation_question(
+            question="Сколько стоят ваши услуги?",
+            conversation_id=conversation["id"],
+            external_chat_id="retrieval-v2-empty",
+            external_user_id="user",
+        )
+
+    provider.assert_not_called()
+    assert response["status"] == "insufficient_document_information"
+    assert response["sources"] == []
+    assert response["retrieval_used"] is True
+    assert "85" not in response["answer"] and "55" not in response["answer"]
+    unanswered = database.list_unanswered_questions(["open"])
+    assert unanswered[0]["max_similarity_score"] == pytest.approx(0.99)
+
+
+def test_no_chunks_uses_question_language_for_safe_answer(isolated_database):
+    document_id = add_document("empty.txt", "No relevant facts.")
+    conversation = database.get_or_create_conversation(
+        "telegram", "ru-empty", "user", default_document_id=document_id
+    )
+    with (
+        patch("rag_service.find_relevant_chunks_semantic", return_value=[]),
+        patch("rag_service.generate_llm_answer") as provider,
+    ):
+        response = rag_service.answer_conversation_question(
+            question="Сколько стоят ваши услуги?",
+            conversation_id=conversation["id"],
+            external_chat_id="ru-empty",
+            external_user_id="user",
+        )
+    provider.assert_not_called()
+    assert response["status"] == "insufficient_document_information"
+    assert "подтвержд" in response["answer"].casefold()
+
+
+def test_multiaspect_missing_categories_force_explicit_partial_label(isolated_database):
+    document_id = add_document("visa.txt", "Visa fee is 85 euros.")
+    conversation = database.get_or_create_conversation(
+        "telegram", "partial-aspects", "user", default_document_id=document_id
+    )
+    relevant = [{
+        "chunk_id": 1, "faq_id": 42, "filename": "visa.txt",
+        "text": "Визовый сбор составляет 85 евро.", "score": 0.9,
+    }]
+    from embedding_retriever import RetrievalChunkList
+    relevant_list = RetrievalChunkList(relevant)
+    relevant_list.diagnostics = {
+        "query_categories": ["company_pricing", "visa_fee"],
+        "covered_query_categories": ["visa_fee"],
+        "missing_query_categories": ["company_pricing"],
+    }
+    llm_result = LLMAnswerResult(
+        "success", "Визовый сбор составляет 85 евро.", "gemini", 1.0,
+    )
+    with (
+        patch("rag_service.find_relevant_chunks_semantic", return_value=relevant_list),
+        patch("rag_service.generate_llm_answer", return_value=llm_result),
+    ):
+        response = rag_service.answer_conversation_question(
+            question="Сколько стоит услуга вместе с визовыми расходами?",
+            conversation_id=conversation["id"],
+            external_chat_id="partial-aspects",
+            external_user_id="user",
+        )
+    assert response["status"] == "partial_information"
+    assert "цене услуг компании" in response["answer"].casefold()

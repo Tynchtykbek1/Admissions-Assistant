@@ -72,3 +72,16 @@ def test_deterministic_rewrite_preserves_refinements_since_latest_topic_switch()
         assert "документ" in standalone
         assert "виз" in standalone
         assert "магистрат" in standalone
+
+
+@pytest.mark.parametrize("question", [
+    "А вместе с визовыми расходами?",
+    "А обучение сюда входит?",
+    "Какие гарантии по этому пакету?",
+])
+def test_package_refinements_are_follow_ups(question):
+    with patch("question_rewriter.generate_provider_text", return_value=None):
+        route = route_conversation(question, PRICING_HISTORY)
+    assert route.is_follow_up is True
+    assert route.rewrite_used is True
+    assert "сопровожд" in route.standalone_question.casefold()

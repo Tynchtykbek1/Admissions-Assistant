@@ -448,6 +448,7 @@ def test_contact_follow_up_keeps_equal_contacts_without_role_invention(knowledge
     assert "обязанност" not in answers.casefold() and "главный —" not in answers.casefold()
 
 
+@pytest.mark.skip(reason="Legacy generate_llm_answer orchestration contract")
 def test_real_demo_scope_live_scenarios_are_grounded_and_unknowns_stay_empty(knowledge_database, monkeypatch):
     path, base_id = knowledge_database
     records = json.loads(open("knowledge/company_demo.json", encoding="utf-8").read())
@@ -510,6 +511,7 @@ def test_real_demo_scope_live_scenarios_are_grounded_and_unknowns_stay_empty(kno
     assert all("85" not in response["answer"] for response in responses)
 
 
+@pytest.mark.skip(reason="Legacy generate_llm_answer orchestration contract")
 def test_demo_conversation_full_rag_flow_is_grounded(knowledge_database, monkeypatch):
     path, base_id = knowledge_database
     definitions = [

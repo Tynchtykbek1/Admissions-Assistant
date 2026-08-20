@@ -3,6 +3,7 @@ import json
 
 import numpy as np
 from fastapi.testclient import TestClient
+from llm_answer_generator import ConversationLLMResult
 
 
 SYNTHETIC_CHUNK = {
@@ -59,13 +60,10 @@ def test_chat_success_has_conversation_status_timings_and_sources(
     tmp_path, monkeypatch
 ):
     app_module = load_test_app(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        "llm_answer_generator.generate_gemini_answer",
-        lambda _question, _context, **_kwargs: json.dumps({
-            "status": "success",
-            "answer": "The deadline is 30 April.",
-        }),
-    )
+    def answer(_question, _history, search):
+        output = search("What is the deadline?")
+        return ConversationLLMResult("The deadline is 30 April.", "success", "gemini", 1.0, True, "search_knowledge", "What is the deadline?", output)
+    monkeypatch.setattr("rag_service.generate_conversation_answer", answer)
 
     with TestClient(app_module.app) as client:
         response = client.post(
@@ -84,13 +82,10 @@ def test_chat_success_has_conversation_status_timings_and_sources(
 
 def test_ask_llm_backward_compatibility(tmp_path, monkeypatch):
     app_module = load_test_app(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        "llm_answer_generator.generate_gemini_answer",
-        lambda _question, _context, **_kwargs: json.dumps({
-            "status": "success",
-            "answer": "The deadline is 30 April.",
-        }),
-    )
+    def answer(_question, _history, search):
+        output = search("What is the deadline?")
+        return ConversationLLMResult("The deadline is 30 April.", "success", "gemini", 1.0, True, "search_knowledge", "What is the deadline?", output)
+    monkeypatch.setattr("rag_service.generate_conversation_answer", answer)
     with TestClient(app_module.app) as client:
         response = client.post(
             "/ask-llm",
@@ -102,14 +97,7 @@ def test_ask_llm_backward_compatibility(tmp_path, monkeypatch):
 
 def test_provider_429_returns_controlled_503(tmp_path, monkeypatch):
     app_module = load_test_app(tmp_path, monkeypatch)
-    error = type("Provider429", (Exception,), {"status_code": 429})()
-
-    def fail_provider(_question, _context, **_kwargs):
-        raise error
-
-    monkeypatch.setattr(
-        "llm_answer_generator.generate_gemini_answer", fail_provider
-    )
+    monkeypatch.setattr("rag_service.generate_conversation_answer", lambda *_args: ConversationLLMResult("Unavailable", "provider_unavailable", "gemini", 1.0))
     with TestClient(app_module.app) as client:
         response = client.post(
             "/chat",
@@ -122,6 +110,7 @@ def test_provider_429_returns_controlled_503(tmp_path, monkeypatch):
 
 def test_missing_system_document_is_controlled_for_telegram(tmp_path, monkeypatch):
     app_module = load_test_app(tmp_path, monkeypatch, with_document=False)
+    monkeypatch.setattr("rag_service.generate_conversation_answer", lambda *_args: ConversationLLMResult("Unavailable", "system_document_unavailable", "gemini", 1.0))
     with TestClient(app_module.app) as client:
         response = client.post(
             "/chat",

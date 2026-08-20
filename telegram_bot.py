@@ -12,7 +12,6 @@ from telegram import Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from logging_config import configure_logging
-from local_responses import farewell_language, greeting_language, resolve_local_response
 from telegram_settings import BACKEND_TIMEOUT
 
 
@@ -405,21 +404,7 @@ async def handle_question(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     question = update.message.text.strip()
-    greeting = greeting_language(question)
-    if greeting:
-        await send_html(update.message, GREETING_MESSAGES[greeting])
-        return
-    farewell = farewell_language(question)
-    if farewell:
-        await send_html(update.message, FAREWELL_MESSAGES[farewell])
-        return
-
     language = detect_text_language(question)
-    local_response = resolve_local_response(question, language)
-    if local_response is not None:
-        await send_html(update.message, local_response)
-        return
-
     async with _chat_lock(update):
         backend_started_at = time.perf_counter()
         typing_task = (

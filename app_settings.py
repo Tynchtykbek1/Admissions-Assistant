@@ -32,7 +32,7 @@ def read_bool(name: str, default: bool) -> bool:
     return value.strip().casefold() in {"1", "true", "yes", "on"}
 
 
-CHAT_HISTORY_LIMIT = read_positive_int("CHAT_HISTORY_LIMIT", 8)
+CHAT_HISTORY_LIMIT = read_positive_int("CHAT_HISTORY_LIMIT", 16)
 CHAT_HISTORY_CHARACTER_LIMIT = read_positive_int("CHAT_HISTORY_CHARACTER_LIMIT", 4000)
 REWRITE_HISTORY_MESSAGE_LIMIT = read_positive_int("REWRITE_HISTORY_MESSAGE_LIMIT", 10)
 REWRITE_HISTORY_CHARACTER_LIMIT = read_positive_int("REWRITE_HISTORY_CHARACTER_LIMIT", 2000)

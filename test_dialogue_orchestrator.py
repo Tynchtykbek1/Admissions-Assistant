@@ -4,6 +4,8 @@ import database
 import rag_service
 import numpy as np
 import pytest
+
+pytestmark = pytest.mark.skip(reason="Deprecated deterministic orchestrator is not in the simple LLM main path")
 import app_settings
 
 

@@ -1,109 +1,75 @@
-import pytest
+import json
+from types import SimpleNamespace
+from unittest.mock import patch
 
-from llm_answer_generator import RAG_INSTRUCTIONS, _build_answer_input
+from google.genai import types
 
-
-@pytest.mark.parametrize(
-    ("question", "expected", "unexpected"),
-    [
-        ("Какие документы нужны для визы?", "Russian. Answer in Russian.", "Answer in English."),
-        ("Нужен IELTS?", "Russian. Answer in Russian.", "Answer in English."),
-        ("What documents are required for a student visa?", "English. Answer in English.", "Answer in Russian."),
-    ],
-)
-def test_final_question_determines_required_answer_language(
-    question, expected, unexpected
-):
-    prompt = _build_answer_input(question, question, None, "Retrieved context")
-    assert expected in prompt
-    assert unexpected not in prompt
+import llm_answer_generator as llm
 
 
-def test_english_question_with_russian_context_requires_english():
-    prompt = _build_answer_input(
-        "What documents are required for a student visa?",
-        None,
-        None,
-        "Для визы нужны документы на русском языке.",
+LANGUAGE_RULE = "Respond in the language of CURRENT_MESSAGE."
+
+
+def _native_tool_response():
+    part = types.Part(function_call=types.FunctionCall(
+        name="search_knowledge", args={"query": "verified query"}
+    ))
+    return SimpleNamespace(
+        function_calls=[part.function_call],
+        candidates=[SimpleNamespace(content=types.Content(role="model", parts=[part]))],
     )
-    assert "English. Answer in English." in prompt
 
 
-@pytest.mark.parametrize("question", [
-    "Sapienza дедлайн?",
-    "Bocconi сроки?",
-    "Politecnico документы?",
-    "University of Messina поступление?",
-    "DSU стипендия есть?",
-    "IELTS нужен?",
-    "Нужен ли TOEFL?",
-    "Виза для Sapienza нужна?",
-    "Какие документы нужны для Master in Economics?",
-    "Когда подача в La Sapienza?",
-])
-def test_mixed_russian_questions_require_russian(question):
-    prompt = _build_answer_input(question, question, None, "English context")
-    assert "Russian. Answer in Russian." in prompt
-    assert "English. Answer in English." not in prompt
+def test_gemini_initial_and_final_calls_include_language_rule(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+    monkeypatch.setenv("GEMINI_MODEL", "fake-model")
+    with patch("llm_answer_generator.genai.Client") as client_factory:
+        client = client_factory.return_value
+        client.models.generate_content.side_effect = [
+            _native_tool_response(),
+            SimpleNamespace(text="Естественный русский ответ."),
+        ]
+        result = llm._generate_gemini_conversation(
+            "Русский вопрос", [], lambda _query: {"VERIFIED_CONTEXT": "English fact"}
+        )
+
+    initial = client.models.generate_content.call_args_list[0].kwargs["config"]
+    final = client.models.generate_content.call_args_list[1].kwargs["config"]
+    assert LANGUAGE_RULE in initial.system_instruction
+    assert LANGUAGE_RULE in final.system_instruction
+    assert result.answer == "Естественный русский ответ."
 
 
-@pytest.mark.parametrize("question", [
-    "What documents are required?",
-    "What is the application deadline for Sapienza?",
-    "Is IELTS required?",
-    "Are DSU scholarships available?",
-    "What documents are required for the University of Messina?",
-])
-def test_english_only_questions_remain_english(question):
-    prompt = _build_answer_input(question, question, None, "Контекст на русском")
-    assert "English. Answer in English." in prompt
-    assert "Russian. Answer in Russian." not in prompt
+def test_openai_initial_and_final_calls_include_language_rule(monkeypatch):
+    calls = []
 
+    def provider_text(provider, instructions, input_text, **_kwargs):
+        calls.append((provider, instructions, input_text))
+        if len(calls) == 1:
+            return json.dumps({"action": "search_knowledge", "query": "verified query"})
+        return "Natural English answer."
 
-def test_russian_question_with_english_context_requires_russian():
-    prompt = _build_answer_input(
-        "Какие документы нужны для студенческой визы?",
-        None,
-        None,
-        "A passport and admission letter are required.",
+    monkeypatch.setattr(llm, "generate_provider_text", provider_text)
+    result = llm._generate_structured_conversation(
+        "openai", "English question", [],
+        lambda _query: {"VERIFIED_CONTEXT": "Подтверждённый факт"},
     )
-    assert "Russian. Answer in Russian." in prompt
+
+    assert len(calls) == 2
+    assert all(LANGUAGE_RULE in instructions for _, instructions, _ in calls)
+    assert "CURRENT_MESSAGE:\nEnglish question" in calls[0][2]
+    assert "VERIFIED_CONTEXT" in calls[1][2]
+    assert result.answer == "Natural English answer."
 
 
-@pytest.mark.parametrize(
-    ("original", "standalone", "expected"),
-    [
-        ("What about the visa?", "What documents are required for the visa?", "English. Answer in English."),
-        ("А для визы?", "Какие документы нужны для визы?", "Russian. Answer in Russian."),
-    ],
-)
-def test_rewritten_follow_up_language_uses_standalone_question(
-    original, standalone, expected
-):
-    prompt = _build_answer_input(original, standalone, None, "Context")
-    assert expected in prompt
-
-
-def test_russian_rewritten_follow_up_with_latin_name_requires_russian():
-    prompt = _build_answer_input(
-        "А там?",
-        "Какие документы нужны для University of Messina?",
-        None,
-        "Context",
+def test_direct_provider_answers_are_returned_without_translation(monkeypatch):
+    expected = "Точный ответ провайдера: DSU 2026."
+    monkeypatch.setattr(
+        llm,
+        "generate_provider_text",
+        lambda *_args, **_kwargs: json.dumps({"action": "answer", "answer": expected}),
     )
-    assert "Russian. Answer in Russian." in prompt
-
-
-@pytest.mark.parametrize("question", ["", "?! … 123"])
-def test_non_letter_question_uses_neutral_language_fallback(question):
-    prompt = _build_answer_input(question, question, None, "Context")
-    assert "Use the same language as the final standalone question." in prompt
-
-
-def test_provider_instructions_make_language_source_explicit():
-    assert "same language as the final standalone question" in RAG_INSTRUCTIONS
-    assert "never from retrieved context" in RAG_INSTRUCTIONS
-    assert "mainly English question" in RAG_INSTRUCTIONS
-    assert "mainly Russian" in RAG_INSTRUCTIONS
-    assert '\"status\":\"success|partial_information|insufficient_document_information\"' in RAG_INSTRUCTIONS
-    assert '\"answer\":\"concise user-facing answer\"' in RAG_INSTRUCTIONS
+    result = llm._generate_structured_conversation(
+        "openai", "Русский вопрос", [], lambda _query: None
+    )
+    assert result.answer == expected

@@ -14,7 +14,6 @@ from embedding_retriever import (
     find_relevant_chunks_semantic,
     normalize_retrieval_query,
 )
-from llm_answer_generator import build_context
 from retrieval_settings import (
     CONTEXT_SCORE_MARGIN,
     SEMANTIC_FALLBACK_SCORE_THRESHOLD,
@@ -111,7 +110,7 @@ def test_exact_match_is_preserved_outside_margin_and_no_accepted_candidate():
     assert none == []
 
 
-def test_faq_fields_and_structured_context_are_preserved():
+def test_faq_fields_are_preserved():
     faq = chunk(1, 0.8, faq_id=301, question="Original question?", answer="Original answer.")
     with patch("embedding_retriever.get_embedding_model", return_value=CountingModel()):
         result = find_relevant_chunks_semantic("Original question?", [faq], min_score=0.20)[0]
@@ -119,17 +118,6 @@ def test_faq_fields_and_structured_context_are_preserved():
     assert result["answer"] == faq["answer"]
     assert result["text_for_retrieval"] == faq["text_for_retrieval"]
     assert "embedding" not in result
-    context = build_context([result])
-    assert "FAQ question:\nOriginal question?" in context
-    assert "FAQ answer:\nOriginal answer." in context
-    assert "Content:" not in context
-
-
-def test_standard_context_remains_backward_compatible():
-    context = build_context([{
-        "chunk_id": 7, "filename": "guide.txt", "text": "Guide text."
-    }])
-    assert context.endswith("Chunk ID: 7\nContent:\nGuide text.")
 
 
 def test_deterministic_tie_breaking_uses_faq_or_chunk_id():

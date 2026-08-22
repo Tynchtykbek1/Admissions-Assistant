@@ -21,22 +21,6 @@ BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
 MAX_MESSAGE_LENGTH = 4000
 TYPING_INTERVAL_SECONDS = 4.0
 
-GREETING_MESSAGES = {
-    "ru": (
-        "Здравствуйте! Я помогу найти информацию о поступлении, документах, "
-        "сроках подачи, визе и других вопросах. Просто напишите свой вопрос."
-    ),
-    "en": (
-        "Hello! I can help you find information about admissions, documents, "
-        "application deadlines, visas, and related topics. Send me your question."
-    ),
-}
-
-FAREWELL_MESSAGES = {
-    "ru": "До свидания! Обращайтесь, если появятся вопросы о поступлении.",
-    "en": "Goodbye! Feel free to return with any admissions questions.",
-}
-
 START_MESSAGES = {
     "ru": (
         "Здравствуйте! Я отвечаю на вопросы по загруженным документам о поступлении.\n\n"

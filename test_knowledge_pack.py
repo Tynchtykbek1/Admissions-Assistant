@@ -7,13 +7,9 @@ import numpy as np
 import pytest
 
 import database
-import rag_service
-import app_settings
 from embedding_retriever import find_relevant_chunks_semantic
-from llm_answer_generator import LLMAnswerResult
 from knowledge_importer import import_knowledge_pack
 from knowledge_validator import KnowledgeValidationError, validate_knowledge_pack
-from conversation_router import route_conversation
 
 
 def record(**overrides):
@@ -246,7 +242,7 @@ def test_explicit_company_guarantee_beats_legacy_visa_amount(knowledge_database)
     assert [chunk.get("knowledge_id") for chunk in relevant] == ["company_guarantees_001"]
 
 
-def test_approved_demo_dialogue_retrieves_only_grounded_business_records(knowledge_database, monkeypatch):
+def test_approved_demo_records_retrieve_only_grounded_business_records(knowledge_database):
     path, base_id = knowledge_database
     cases = [
         ("services", "Чем вы помогаете?", "company_services", "Помогаем подготовить подтверждённый пакет документов."),
@@ -271,20 +267,12 @@ def test_approved_demo_dialogue_retrieves_only_grounded_business_records(knowled
     chunks = database.load_document_chunks(result.document_id)
     assert not any(chunk.get("knowledge_id") == "pending_hidden" for chunk in chunks)
     for _suffix, question, category, _answer in cases:
-        route = route_conversation(question, [])
         relevant = find_relevant_chunks_semantic(
-            question, chunks, intent=route.intent, risk_level=route.risk_level,
+            question, chunks, intent=category, risk_level="high",
         )
         assert any(chunk.get("knowledge_category") == category for chunk in relevant)
         if category == "company_pricing":
             assert all(chunk.get("faq_id") != 42 for chunk in relevant)
-
-    history = [{"role": "user", "content": "Сколько стоит сопровождение?"}]
-    monkeypatch.setattr("question_rewriter.generate_provider_text", lambda *_args, **_kwargs: None)
-    follow_up = route_conversation("Что входит в эту цену?", history)
-    assert follow_up.is_follow_up and follow_up.rewrite_used
-    assert "сопровожд" in follow_up.standalone_question.casefold()
-
 
 def test_demo_pack_has_three_production_contacts_and_five_demo_records():
     records = json.loads(open("knowledge/company_demo.json", encoding="utf-8").read())
@@ -420,140 +408,12 @@ def test_real_contact_queries_return_only_three_approved_handles(knowledge_datab
     records = json.loads(open("knowledge/company_demo.json", encoding="utf-8").read())
     imported = import_knowledge_pack(records, path, "company-pack", base_id, scope="production", apply=True)
     chunks = database.load_document_chunks(imported.document_id)
-    route = route_conversation(question, [])
-    relevant = find_relevant_chunks_semantic(question, chunks, intent=route.intent, risk_level=route.risk_level)
+    relevant = find_relevant_chunks_semantic(
+        question, chunks, intent="manager_contact", risk_level="high"
+    )
     answers = "\n".join(chunk["text"] for chunk in relevant if chunk.get("knowledge_id"))
-    assert route.intent == "manager_contact"
     assert set(re.findall(r"@[A-Za-z0-9_]+", answers)) == {
         "@hellhg", "@TheLuckiestPersonEver", "@maksatuniguide",
     }
     assert "@" in answers and "phone" not in answers.casefold() and "email" not in answers.casefold()
     assert getattr(relevant, "diagnostics", {})["knowledge_scopes"] == ["production"]
-
-
-def test_contact_follow_up_keeps_equal_contacts_without_role_invention(knowledge_database, monkeypatch):
-    path, base_id = knowledge_database
-    records = json.loads(open("knowledge/company_demo.json", encoding="utf-8").read())
-    imported = import_knowledge_pack(records, path, "company-pack", base_id, scope="production", apply=True)
-    chunks = database.load_document_chunks(imported.document_id)
-    history = [{"role": "user", "content": "Как связаться?"}]
-    monkeypatch.setattr("question_rewriter.generate_provider_text", lambda *_args, **_kwargs: None)
-    route = route_conversation("А кто главный?", history)
-    relevant = find_relevant_chunks_semantic(route.standalone_question, chunks, intent=route.intent, risk_level=route.risk_level)
-    answers = "\n".join(chunk["text"] for chunk in relevant if chunk.get("knowledge_id"))
-    assert route.is_follow_up and route.rewrite_used
-    assert set(re.findall(r"@[A-Za-z0-9_]+", answers)) == {
-        "@hellhg", "@TheLuckiestPersonEver", "@maksatuniguide",
-    }
-    assert "обязанност" not in answers.casefold() and "главный —" not in answers.casefold()
-
-
-@pytest.mark.skip(reason="Legacy generate_llm_answer orchestration contract")
-def test_real_demo_scope_live_scenarios_are_grounded_and_unknowns_stay_empty(knowledge_database, monkeypatch):
-    path, base_id = knowledge_database
-    records = json.loads(open("knowledge/company_demo.json", encoding="utf-8").read())
-    imported = import_knowledge_pack(records, path, "company-pack", base_id, scope="demo", apply=True)
-    monkeypatch.setattr(app_settings, "SYSTEM_DOCUMENT_ID", imported.document_id)
-    monkeypatch.setattr("question_rewriter.generate_provider_text", lambda *_args, **_kwargs: None)
-    rag_service.invalidate_document_cache()
-
-    def grounded_answer(_question, chunks, **_kwargs):
-        business = [chunk["text"] for chunk in chunks if chunk.get("knowledge_id")]
-        assert business
-        status = (
-            "partial_information"
-            if any(marker in _question.casefold() for marker in ("входит в полный", "какие именно экзамены"))
-            else "success"
-        )
-        return LLMAnswerResult(status, "\n".join(business), "mock", 1.0)
-
-    monkeypatch.setattr(rag_service, "generate_llm_answer", grounded_answer)
-    questions = [
-        "Чем занимается компания?",
-        "В какие страны вы помогаете поступить?",
-        "Сколько стоит сопровождение?",
-        "Почему цена отличается?",
-        "Какие есть пакеты?",
-        "Что входит в полный пакет?",
-        "Помогаете ли с языковым экзаменом?",
-        "Какие именно экзамены?",
-        "Как связаться с компанией?",
-        "Кто главный менеджер?",
-        "Какие гарантии?",
-        "Возвращаете ли вы деньги?",
-    ]
-    responses = [
-        rag_service.answer_conversation_question(
-            question=question, external_chat_id="real-demo-scope-smoke",
-            external_user_id="demo-user",
-        )
-        for question in questions
-    ]
-    assert "Итали" in responses[1]["answer"]
-    assert "1200" in responses[2]["answer"] and "1600" in responses[2]["answer"]
-    assert "85" not in responses[2]["answer"] + responses[3]["answer"]
-    assert responses[3]["is_follow_up"] and responses[3]["rewrite_used"]
-    assert "требует подтверждения" in responses[4]["answer"].casefold()
-    assert responses[5]["is_follow_up"] and "требует подтверждения" in responses[5]["answer"].casefold()
-    assert responses[5]["status"] == "partial_information"
-    for response in responses[6:8]:
-        lowered = response["answer"].casefold()
-        assert "требуют подтверждения" in lowered, response
-        assert all(term not in lowered for term in ("ielts", "toefl", "cent"))
-    assert responses[7]["status"] == "partial_information"
-    for response in responses[8:10]:
-        assert set(re.findall(r"@[A-Za-z0-9_]+", response["answer"])) == {
-            "@hellhg", "@TheLuckiestPersonEver", "@maksatuniguide",
-        }, response
-    assert responses[9]["is_follow_up"] and responses[9]["rewrite_used"]
-    assert responses[10]["status"] == "insufficient_document_information"
-    assert responses[11]["status"] == "insufficient_document_information"
-    assert all("85" not in response["answer"] for response in responses)
-
-
-@pytest.mark.skip(reason="Legacy generate_llm_answer orchestration contract")
-def test_demo_conversation_full_rag_flow_is_grounded(knowledge_database, monkeypatch):
-    path, base_id = knowledge_database
-    definitions = [
-        ("company_services_101", "Чем вы помогаете?", "company_services", "Подтверждённая помощь компании."),
-        ("company_pricing_101", "Сколько стоит сопровождение?", "company_pricing", "Тестовая подтверждённая цена пакета."),
-        ("company_pricing_102", "Что входит в эту цену?", "company_pricing", "Подтверждённый состав цены."),
-        ("company_guarantees_101", "Какие гарантии?", "company_guarantees", "Только подтверждённая договорная гарантия."),
-        ("rejection_support_101", "Что будет при отказе?", "rejection_support", "Подтверждённое действие при отказе."),
-        ("manager_contact_101", "Как связаться с менеджером?", "manager_contact", "Адахан — @TheLuckiestPersonEver; Максат — @maksatuniguide."),
-    ]
-    records = [
-        record(
-            id=item_id, question={"ru": question, "en": f"Demo {index}?"},
-            answer={"ru": answer, "en": f"Approved {index}."}, category=category,
-            aliases={"ru": [], "en": []},
-        )
-        for index, (item_id, question, category, answer) in enumerate(definitions, 1)
-    ]
-    imported = import_knowledge_pack(records, path, "company-demo", base_id, apply=True)
-    monkeypatch.setattr(app_settings, "SYSTEM_DOCUMENT_ID", imported.document_id)
-    monkeypatch.setattr("question_rewriter.generate_provider_text", lambda *_args, **_kwargs: None)
-    rag_service.invalidate_document_cache()
-
-    def grounded_answer(_question, chunks, **_kwargs):
-        assert chunks
-        assert all(chunk.get("knowledge_id") for chunk in chunks)
-        return LLMAnswerResult("success", chunks[0]["text"], "mock", 1.0)
-
-    monkeypatch.setattr(rag_service, "generate_llm_answer", grounded_answer)
-    chat_id = "demo-knowledge-smoke"
-    responses = [
-        rag_service.answer_conversation_question(
-            question=question, external_chat_id=chat_id, external_user_id="demo-user"
-        )
-        for question in [
-            "Чем вы помогаете?", "Сколько стоит сопровождение?",
-            "Что входит в эту цену?", "Какие гарантии?",
-            "Что будет при отказе?", "Как связаться с менеджером?",
-        ]
-    ]
-    assert all(response["status"] == "success" for response in responses)
-    assert responses[2]["is_follow_up"] and responses[2]["rewrite_used"]
-    assert all("85" not in response["answer"] for response in responses)
-    assert "@TheLuckiestPersonEver" in responses[-1]["answer"]
-    assert "@maksatuniguide" in responses[-1]["answer"]

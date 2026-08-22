@@ -7,7 +7,6 @@ from telegram.constants import ChatAction, ParseMode
 
 from telegram_bot import (
     ERROR_MESSAGES,
-    FAREWELL_MESSAGES,
     HELP_MESSAGES,
     NO_INFORMATION_MESSAGES,
     PROVIDER_UNAVAILABLE_MESSAGES,
@@ -24,7 +23,6 @@ from telegram_bot import (
     stop_typing,
     start_command,
 )
-from local_responses import LOCAL_RESPONSES
 
 
 def make_update(text="question", language_code="ru", chat_id=123, user_id=456):
@@ -169,98 +167,6 @@ class TelegramFormattingTests(unittest.TestCase):
 
 
 class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
-    async def assert_local_greeting(self, text, expected_language):
-        update = make_update(text)
-        with patch("telegram_bot.ask_backend", new=AsyncMock()) as backend:
-            await handle_question(update, SimpleNamespace())
-        backend.assert_not_awaited()
-        update.effective_chat.send_action.assert_not_awaited()
-        sent = update.message.reply_text.await_args.args[0]
-        self.assertIn("Здравствуйте" if expected_language == "ru" else "Hello", sent)
-
-    @unittest.skip("Greetings now go through the LLM backend")
-    async def test_russian_greeting_is_local(self):
-        await self.assert_local_greeting("Привет!", "ru")
-
-    @unittest.skip("Greetings now go through the LLM backend")
-    async def test_english_greeting_is_local(self):
-        await self.assert_local_greeting("Hello", "en")
-
-    @unittest.skip("Farewells now go through the LLM backend")
-    async def test_short_farewells_are_local(self):
-        for text, language in (
-            ("пока", "ru"),
-            ("спасибо", "ru"),
-            ("спасибо, пока", "ru"),
-            ("bye", "en"),
-            ("thank you", "en"),
-        ):
-            update = make_update(text)
-            with patch("telegram_bot.ask_backend", new=AsyncMock()) as backend:
-                await handle_question(update, SimpleNamespace())
-            backend.assert_not_awaited()
-            update.effective_chat.send_action.assert_not_awaited()
-            self.assertEqual(
-                update.message.reply_text.await_args.args[0],
-                FAREWELL_MESSAGES[language],
-            )
-
-    @unittest.skip("Conversational intents now go through the LLM backend")
-    async def test_local_intents_bypass_every_backend_path_and_typing(self):
-        cases = (
-            ("Кто ты?", "ru", "identity"),
-            ("What can you do?", "en", "capabilities"),
-            ("Как связаться с менеджером?", "ru", "manager"),
-            ("Tell me a joke", "en", "out_of_scope"),
-        )
-        for text, language, intent in cases:
-            update = make_update(text)
-            context = SimpleNamespace(chat_data={"conversation_id": "existing"})
-            with (
-                patch("telegram_bot.ask_backend", new=AsyncMock()) as ask,
-                patch("telegram_bot.reset_backend", new=AsyncMock()) as reset,
-                patch("telegram_bot.backend_status", new=AsyncMock()) as status,
-                patch("telegram_bot.keep_typing", new=AsyncMock()) as typing,
-            ):
-                await handle_question(update, context)
-
-            ask.assert_not_awaited()
-            reset.assert_not_awaited()
-            status.assert_not_awaited()
-            typing.assert_not_awaited()
-            update.effective_chat.send_action.assert_not_awaited()
-            self.assertEqual(context.chat_data, {"conversation_id": "existing"})
-            update.message.reply_text.assert_awaited_once_with(
-                LOCAL_RESPONSES[intent][language],
-                parse_mode=ParseMode.HTML,
-            )
-
-    @unittest.skip("Contacts now require verified tool context")
-    async def test_manager_contacts_are_exact_and_safe_for_html_mode(self):
-        for text, language in (
-            ("Кто твой менеджер?", "ru"),
-            ("Who is your manager?", "en"),
-        ):
-            update = make_update(text)
-            await handle_question(update, SimpleNamespace(chat_data={}))
-            sent = update.message.reply_text.await_args
-            self.assertEqual(sent.kwargs["parse_mode"], ParseMode.HTML)
-            self.assertIn("@TheLuckiestPersonEver", sent.args[0])
-            self.assertIn("@maksatuniguide", sent.args[0])
-            self.assertIn("@hellhg", sent.args[0])
-            self.assertNotIn("<", sent.args[0])
-            self.assertNotIn(">", sent.args[0])
-
-    @unittest.skip("Out-of-scope conversation now goes through the LLM backend")
-    async def test_local_message_cannot_reach_unanswered_recording_path(self):
-        update = make_update("Какая сегодня погода?")
-        with patch(
-            "telegram_bot.ask_backend",
-            new=AsyncMock(side_effect=AssertionError("backend records unanswered")),
-        ) as backend:
-            await handle_question(update, SimpleNamespace(chat_data={}))
-        backend.assert_not_awaited()
-
     async def test_longer_question_containing_thanks_calls_backend(self):
         update = make_update("Спасибо, какие документы нужны для визы?")
         backend_result = {
@@ -348,17 +254,6 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             update.message.reply_text.await_args.args[0],
             NO_INFORMATION_MESSAGES["en"],
-        )
-
-    @unittest.skip("Contacts now require verified tool context")
-    async def test_russian_manager_response_uses_russian_language_detection(self):
-        question = "Кто твой менеджер?"
-        self.assertEqual(detect_text_language(f"Sapienza {question}"), "ru")
-        update = make_update(question)
-        await handle_question(update, SimpleNamespace(chat_data={}))
-        self.assertEqual(
-            update.message.reply_text.await_args.args[0],
-            LOCAL_RESPONSES["manager"]["ru"],
         )
 
     async def test_localized_backend_error(self):

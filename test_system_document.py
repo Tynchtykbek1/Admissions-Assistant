@@ -217,30 +217,6 @@ def test_missing_or_empty_system_document_is_controlled(
     assert empty.json()["status"] == "system_document_unavailable"
 
 
-@pytest.mark.skip(reason="Legacy deterministic safe-route contract")
-def test_safe_routes_do_not_require_available_system_document(tmp_path, monkeypatch):
-    _, _, _, _, app_module = _load_modules(tmp_path, monkeypatch, "999")
-    with TestClient(app_module.app) as client:
-        greeting = client.post("/chat", json={
-            "question": "Привет", "external_chat_id": "safe-chat-1",
-            "external_user_id": "user",
-        })
-        definition = client.post("/chat", json={
-            "question": "Что такое бакалавриат?", "external_chat_id": "safe-chat-2",
-            "external_user_id": "user",
-        })
-        verified = client.post("/chat", json={
-            "question": "Сколько стоят услуги?", "external_chat_id": "safe-chat-3",
-            "external_user_id": "user",
-        })
-    assert greeting.status_code == 200
-    assert greeting.json()["response_mode"] == "local_response"
-    assert definition.status_code == 200
-    assert definition.json()["response_mode"] == "general_knowledge"
-    assert verified.status_code == 503
-    assert verified.json()["status"] == "system_document_unavailable"
-
-
 def test_ready_requires_available_system_document_with_chunks(
     tmp_path, monkeypatch
 ):
@@ -265,65 +241,6 @@ def test_ready_requires_available_system_document_with_chunks(
         "system_document_available": True,
         "demo_mode": False,
     }
-
-
-@pytest.mark.skip(reason="Legacy generate_llm_answer mock contract")
-def test_chat_uses_system_document_and_accepts_matching_id(
-    tmp_path, monkeypatch
-):
-    _, database, _, _, app_module = _load_modules(tmp_path, monkeypatch)
-    system_id = _add_document(database, "system.txt")
-
-    class FakeModel:
-        def encode(self, _text, normalize_embeddings=True):
-            return np.array([1.0, 0.0])
-
-    monkeypatch.setattr(
-        "embedding_retriever.get_embedding_model",
-        lambda: FakeModel(),
-    )
-    monkeypatch.setattr(
-        "llm_answer_generator.generate_gemini_answer",
-        lambda _question, _context, **_kwargs: json.dumps(
-            {"status": "success", "answer": "Supported system answer."}
-        ),
-    )
-    with TestClient(app_module.app) as client:
-        response = client.post(
-            "/chat",
-            json={
-                "question": "What is required?",
-                "document_id": system_id,
-                "external_chat_id": "chat",
-                "external_user_id": "user",
-            },
-        )
-
-    assert response.status_code == 200
-    assert response.json()["document_id"] == system_id
-    assert response.json()["sources"][0]["filename"] == "system.txt"
-
-
-@pytest.mark.skip(reason="Legacy pre-LLM system-document routing contract")
-def test_invalid_system_document_setting_never_falls_back_to_latest(
-    tmp_path, monkeypatch
-):
-    _, database, _, _, app_module = _load_modules(tmp_path, monkeypatch, "-4")
-    latest_id = _add_document(database, "latest.txt")
-
-    with TestClient(app_module.app) as client:
-        response = client.post(
-            "/chat",
-            json={
-                "question": "What is required?",
-                "external_chat_id": "chat",
-                "external_user_id": "user",
-            },
-        )
-
-    assert latest_id == 1
-    assert response.status_code == 503
-    assert response.json()["status"] == "system_document_unavailable"
 
 
 def test_missing_telegram_identity_is_rejected_by_all_conversation_endpoints(

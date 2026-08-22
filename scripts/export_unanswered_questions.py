@@ -14,14 +14,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from database import UNANSWERED_QUESTION_STATUSES, list_unanswered_questions
-from local_responses import (
-    farewell_language,
-    greeting_language,
-    local_intent,
-    normalize_local_text,
-)
-
-
 CSV_FIELDS = (
     "id",
     "question",
@@ -54,6 +46,29 @@ TECHNICAL_ERROR_TEXTS = frozenset({
     "сейчас не удалось получить ответ пожалуйста попробуйте ещё раз немного позже",
 })
 URL_ONLY_RE = re.compile(r"^\s*(?:https?://|www\.)\S+\s*$", re.IGNORECASE)
+NOISE_QUESTIONS = frozenset({
+    "привет", "здравствуйте", "добрый день", "доброе утро", "добрый вечер", "салам",
+    "hi", "hello", "hey", "good morning", "good afternoon", "good evening",
+    "пока", "до свидания", "спасибо", "спасибо пока",
+    "bye", "goodbye", "thanks", "thank you",
+    "как тебя зовут", "кто ты", "как называется этот бот", "представься", "что ты за бот",
+    "what is your name", "what s your name", "who are you", "what bot are you", "introduce yourself",
+    "что ты умеешь", "на какие вопросы ты можешь ответить", "какие вопросы можно задавать",
+    "чем ты можешь помочь", "в чем ты можешь помочь", "о чем тебя можно спрашивать",
+    "что можно у тебя спросить", "what can you do", "what questions can i ask",
+    "how can you help", "what can i ask you", "what topics do you cover",
+    "кто твой менеджер", "кто менеджер", "кто может помочь с поступлением",
+    "как связаться с менеджером", "как связаться с человеком", "можно поговорить с менеджером",
+    "кому написать по поводу поступления", "кто знает все о поступлении",
+    "кто может проконсультировать", "дай контакты менеджера", "с кем можно связаться",
+    "кому обратиться за помощью", "who is your manager", "how can i contact a manager",
+    "can i speak to a human", "who can help me with admission",
+    "who should i contact about admissions", "can i contact an admissions manager",
+    "who can give me personal assistance", "give me the manager contacts",
+    "какая сегодня погода", "расскажи анекдот", "сколько будет 2 2", "напиши стих",
+    "кто выиграл матч", "как приготовить пиццу", "what is the weather", "tell me a joke",
+    "what is 2 2", "write a poem", "who won the match", "how do i cook pizza",
+})
 
 
 def parse_since(value: str) -> date:
@@ -107,7 +122,8 @@ def detect_language(text: str) -> str:
 
 
 def normalize_clean_question(text: str) -> str:
-    return normalize_local_text(text)
+    without_punctuation = re.sub(r"[^\w\s]", " ", text.casefold(), flags=re.UNICODE)
+    return " ".join(without_punctuation.split())
 
 
 def is_noise_question(text: str) -> bool:
@@ -116,12 +132,8 @@ def is_noise_question(text: str) -> bool:
         return True
     if not re.search(r"[A-Za-zА-Яа-яЁё0-9]", stripped):
         return True
-    language = detect_language(stripped)
-    if greeting_language(stripped) or farewell_language(stripped):
-        return True
-    if local_intent(stripped, language):
-        return True
-    return normalize_clean_question(stripped) in TECHNICAL_ERROR_TEXTS
+    normalized = normalize_clean_question(stripped)
+    return normalized in NOISE_QUESTIONS or normalized in TECHNICAL_ERROR_TEXTS
 
 
 def _faq_ids(value: str | None) -> set[int]:

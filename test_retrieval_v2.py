@@ -10,7 +10,6 @@ from retrieval_reranker import (
     infer_query_categories,
     retrieve_relevant_chunks,
 )
-from conversation_router import route_conversation
 
 
 class FixedQueryModel:
@@ -128,35 +127,14 @@ def test_prompt_injection_cannot_disable_category_filter():
     assert 2 not in selected_ids(result)
 
 
-def test_follow_up_rewrites_keep_pricing_and_guarantee_domains():
-    pricing_history = [
-        {"role": "user", "content": "Сколько стоят ваши услуги?"},
-        {"role": "assistant", "content": "Подтверждённой цены в базе нет."},
-    ]
-    price_route = route_conversation("Что входит в эту цену?", pricing_history)
-    guarantee_route = route_conversation(
-        "А какие гарантии?",
-        pricing_history + [
-            {"role": "user", "content": "Что входит в эту цену?"},
-            {"role": "assistant", "content": "Подтверждённой информации пока нет."},
-        ],
-    )
-    assert price_route.rewrite_used and guarantee_route.rewrite_used
-    price = retrieve(price_route.standalone_question, price_route.intent)
-    guarantee = retrieve(guarantee_route.standalone_question, guarantee_route.intent)
-    assert not ({2, 3, 4, 5} & set(selected_ids(price)))
-    assert not ({7, 8, 9} & set(selected_ids(guarantee)))
-
-
-@pytest.mark.parametrize(("question", "expected"), [
-    ("Сколько стоит обучение?", 4),
-    ("Сколько стоит CEnT?", 3),
-    ("Гарантирована ли виза?", 8),
-    ("Есть ли гарантия на стипендию?", 7),
+@pytest.mark.parametrize(("question", "intent", "expected"), [
+    ("Сколько стоит обучение?", "admissions_general", 4),
+    ("Сколько стоит CEnT?", "admissions_general", 3),
+    ("Гарантирована ли виза?", "visa", 8),
+    ("Есть ли гарантия на стипендию?", "scholarship", 7),
 ])
-def test_explicit_domain_refines_broad_router_intent(question, expected):
-    route = route_conversation(question, [])
-    result = retrieve(question, route.intent)
+def test_explicit_domain_refines_broad_intent(question, intent, expected):
+    result = retrieve(question, intent)
     assert selected_ids(result)[0] == expected
 
 

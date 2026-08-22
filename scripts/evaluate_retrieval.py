@@ -52,7 +52,6 @@ def evaluate(database: Path, document_id: int, cases_path: Path) -> dict:
     os.environ["DATABASE_PATH"] = str(database)
     from retrieval_reranker import retrieve_relevant_chunks
     from retrieval_reranker import infer_query_categories
-    from conversation_router import route_conversation
 
     cases = json.loads(cases_path.read_text(encoding="utf-8"))
     chunks = _load_chunks_read_only(database, document_id)
@@ -67,9 +66,8 @@ def evaluate(database: Path, document_id: int, cases_path: Path) -> dict:
     failures = 0
     for case in cases:
         started = time.perf_counter()
-        route = route_conversation(case["question"], [])
-        intent = case.get("intent", route.intent)
-        risk_level = case.get("risk_level", route.risk_level)
+        intent = case.get("intent", "unknown")
+        risk_level = case.get("risk_level", "high")
         query_categories = infer_query_categories(case["question"], intent)
         retrieval = retrieve_relevant_chunks(
             case["question"],

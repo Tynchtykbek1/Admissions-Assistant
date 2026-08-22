@@ -33,7 +33,7 @@ services:
       - .env
     environment:
       BACKEND_URL: http://backend:8000
-    command: ["python", "telegram_bot.py"]
+    command: ["python", "-m", "admissions_rag_assistant.telegram_bot"]
     depends_on:
       backend:
         condition: service_healthy

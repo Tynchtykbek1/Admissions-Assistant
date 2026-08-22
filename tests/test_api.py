@@ -22,8 +22,8 @@ def upload_text(client: TestClient, filename: str, text: str) -> dict:
     )
     response.raise_for_status()
     result = response.json()
-    import app_settings
-    import conversation_service
+    from admissions_rag_assistant import app_settings
+    from admissions_rag_assistant import conversation_service
 
     app_settings.SYSTEM_DOCUMENT_ID = result["document_id"]
     app_settings.SYSTEM_DOCUMENT_ID_INVALID = False
@@ -68,8 +68,8 @@ def main() -> None:
         temporary_db = Path(temporary_directory) / "test_admissions.db"
         os.environ["DATABASE_PATH"] = str(temporary_db)
 
-        import database
-        import app
+        from admissions_rag_assistant import database
+        from admissions_rag_assistant import app
 
         database = importlib.reload(database)
         app = importlib.reload(app)

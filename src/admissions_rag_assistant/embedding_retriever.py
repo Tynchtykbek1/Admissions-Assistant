@@ -1,4 +1,4 @@
-from embedding_model import get_embedding_model
+from .embedding_model import get_embedding_model
 import numpy as np
 import re
 
@@ -215,7 +215,7 @@ def find_relevant_chunks_semantic(
     # Existing callers retain semantic-only behavior. Conversation routing
     # supplies an intent and activates Retrieval v2 through this compatible API.
     if intent is not None:
-        from retrieval_reranker import (
+        from .retrieval_reranker import (
             covered_query_categories,
             infer_query_categories,
             retrieve_relevant_chunks,

@@ -26,11 +26,11 @@ def _load_modules(tmp_path, monkeypatch, system_document_id: str = "1"):
     monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
     monkeypatch.setenv("GEMINI_MODEL", "fake-model")
 
-    import app_settings
-    import database
-    import conversation_service
-    import rag_service
-    import app
+    from admissions_rag_assistant import app_settings
+    from admissions_rag_assistant import database
+    from admissions_rag_assistant import conversation_service
+    from admissions_rag_assistant import rag_service
+    from admissions_rag_assistant import app
 
     app_settings = importlib.reload(app_settings)
     database = importlib.reload(database)
@@ -178,11 +178,11 @@ def test_missing_or_empty_system_document_is_controlled(
     _, database, _, _, app_module = _load_modules(tmp_path, monkeypatch, "2")
     _add_document(database, "empty.txt", with_chunks=False)
     monkeypatch.setattr(
-        "rag_service.generate_conversation_answer",
+        "admissions_rag_assistant.rag_service.generate_conversation_answer",
         lambda *_args: pytest.fail("LLM/provider must not be called"),
     )
     monkeypatch.setattr(
-        "rag_service.find_relevant_chunks_semantic",
+        "admissions_rag_assistant.rag_service.find_relevant_chunks_semantic",
         lambda **_kwargs: pytest.fail("retrieval must not be called"),
     )
 
@@ -201,7 +201,7 @@ def test_missing_or_empty_system_document_is_controlled(
     assert "2" not in missing.json()["answer"]
 
     monkeypatch.setenv("SYSTEM_DOCUMENT_ID", "1")
-    import app_settings
+    from admissions_rag_assistant import app_settings
 
     importlib.reload(app_settings)
     with TestClient(app_module.app) as client:

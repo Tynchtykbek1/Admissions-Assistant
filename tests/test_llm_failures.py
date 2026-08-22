@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 from google.genai import types
 
-import llm_answer_generator as llm
+from admissions_rag_assistant import llm_answer_generator as llm
 
 
 @pytest.fixture(autouse=True)
@@ -31,7 +31,7 @@ def _native_tool_response():
 
 def test_native_tool_round_trip_preserves_original_content(monkeypatch):
     first, original_content = _native_tool_response()
-    generate = patch("llm_answer_generator.genai.Client")
+    generate = patch("admissions_rag_assistant.llm_answer_generator.genai.Client")
     with generate as client_factory:
         client = client_factory.return_value
         client.models.generate_content.side_effect = [
@@ -54,7 +54,7 @@ def test_native_tool_round_trip_preserves_original_content(monkeypatch):
 
 def test_post_tool_provider_error_preserves_tool_diagnostics(monkeypatch):
     first, _ = _native_tool_response()
-    with patch("llm_answer_generator.genai.Client") as client_factory:
+    with patch("admissions_rag_assistant.llm_answer_generator.genai.Client") as client_factory:
         client = client_factory.return_value
         client.models.generate_content.side_effect = [first, TimeoutError()]
         tool_output = {"results": [{"id": "knowledge-1"}]}

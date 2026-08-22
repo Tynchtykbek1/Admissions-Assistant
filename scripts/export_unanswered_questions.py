@@ -3,17 +3,12 @@ import csv
 import json
 import os
 import re
-import sys
 import tempfile
 from datetime import date, datetime, timezone
 from pathlib import Path
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-from database import UNANSWERED_QUESTION_STATUSES, list_unanswered_questions
+from admissions_rag_assistant.database import UNANSWERED_QUESTION_STATUSES, list_unanswered_questions
 CSV_FIELDS = (
     "id",
     "question",

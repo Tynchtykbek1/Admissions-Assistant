@@ -1,7 +1,7 @@
 import logging
 
-from logging_config import configure_logging
-from logging_config import safe_log_text
+from admissions_rag_assistant.logging_config import configure_logging
+from admissions_rag_assistant.logging_config import safe_log_text
 
 
 def test_third_party_http_logs_cannot_emit_secret_bearing_urls(caplog):

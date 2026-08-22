@@ -2,14 +2,8 @@ import argparse
 import json
 import os
 import sqlite3
-import sys
 import time
 from pathlib import Path
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
 
 def parse_args() -> argparse.Namespace:
@@ -50,8 +44,8 @@ def _load_chunks_read_only(database: Path, document_id: int) -> list[dict]:
 
 def evaluate(database: Path, document_id: int, cases_path: Path) -> dict:
     os.environ["DATABASE_PATH"] = str(database)
-    from retrieval_reranker import retrieve_relevant_chunks
-    from retrieval_reranker import infer_query_categories
+    from admissions_rag_assistant.retrieval_reranker import retrieve_relevant_chunks
+    from admissions_rag_assistant.retrieval_reranker import infer_query_categories
 
     cases = json.loads(cases_path.read_text(encoding="utf-8"))
     chunks = _load_chunks_read_only(database, document_id)

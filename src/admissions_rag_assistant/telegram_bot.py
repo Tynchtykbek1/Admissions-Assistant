@@ -11,8 +11,8 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
-from logging_config import configure_logging
-from telegram_settings import BACKEND_TIMEOUT
+from .logging_config import configure_logging
+from .telegram_settings import BACKEND_TIMEOUT
 
 
 load_dotenv()

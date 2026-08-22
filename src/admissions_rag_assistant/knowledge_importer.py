@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, unquote
 
-from embedding_model import get_embedding_model, get_embedding_model_name
-from knowledge_validator import validate_knowledge_pack
+from .embedding_model import get_embedding_model, get_embedding_model_name
+from .knowledge_validator import validate_knowledge_pack
 
 
 MARKER_PREFIX = "[[company_knowledge_v1"

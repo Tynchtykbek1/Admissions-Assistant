@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from llm_answer_generator import (
+from admissions_rag_assistant.llm_answer_generator import (
     ConversationLLMResult,
     INSUFFICIENT_DOCUMENT_INFORMATION,
     INSUFFICIENT_INFORMATION_ANSWER,
@@ -85,11 +85,11 @@ def _load_stack(tmp_path, monkeypatch, system_document_id="1"):
     monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
     monkeypatch.setenv("GEMINI_MODEL", "fake-model")
 
-    import app_settings
-    import database
-    import conversation_service
-    import rag_service
-    import app
+    from admissions_rag_assistant import app_settings
+    from admissions_rag_assistant import database
+    from admissions_rag_assistant import conversation_service
+    from admissions_rag_assistant import rag_service
+    from admissions_rag_assistant import app
 
     app_settings = importlib.reload(app_settings)
     database = importlib.reload(database)
@@ -97,7 +97,7 @@ def _load_stack(tmp_path, monkeypatch, system_document_id="1"):
     rag_service = importlib.reload(rag_service)
     app = importlib.reload(app)
     monkeypatch.setattr(
-        "embedding_retriever.get_embedding_model",
+        "admissions_rag_assistant.embedding_retriever.get_embedding_model",
         lambda: DeterministicEmbeddingModel(),
     )
     rag_service.invalidate_document_cache()

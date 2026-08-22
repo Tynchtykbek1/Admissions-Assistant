@@ -61,21 +61,22 @@ is persisted when appropriate, and is returned to Telegram.
 ## Actual project structure
 
 ```text
-app.py                       FastAPI endpoints and startup readiness
-telegram_bot.py              Telegram commands and /chat transport
-conversation_service.py      Conversation and system-document resolution
-rag_service.py               Active model/tool/retrieval/guard orchestration
-llm_answer_generator.py      Gemini/OpenAI conversation provider boundary
-embedding_model.py           Cached embedding-model loading
-embedding_retriever.py       Semantic and lexical candidate scoring
-retrieval_reranker.py        Hybrid/category-aware reranking
-database.py                  SQLite schema and repositories
-document_processor.py        PDF/TXT parsing and chunking
-knowledge_validator.py       Knowledge-pack schema and policy validation
-knowledge_importer.py        Atomic scoped knowledge import
+src/admissions_rag_assistant/
+  app.py                     FastAPI endpoints and startup readiness
+  telegram_bot.py            Telegram commands and /chat transport
+  conversation_service.py    Conversation and system-document resolution
+  rag_service.py             Active model/tool/retrieval/guard orchestration
+  llm_answer_generator.py    Gemini/OpenAI conversation provider boundary
+  embedding_model.py         Cached embedding-model loading
+  embedding_retriever.py     Semantic and lexical candidate scoring
+  retrieval_reranker.py      Hybrid/category-aware reranking
+  database.py                SQLite schema and repositories
+  document_processor.py      PDF/TXT parsing and chunking
+  knowledge_*.py             Knowledge validation and atomic import
 knowledge/                   Versioned knowledge data and scope notes
 scripts/                     Validation, import, audit, export, evaluation, smoke
-test_*.py                    Unit and integration tests
+tests/                       Unit and integration tests and fixtures
+pyproject.toml               Setuptools src-layout package metadata
 ```
 
 ## System-document activation
@@ -282,7 +283,8 @@ python -m venv .venv
 .\.venv\Scripts\activate
 Copy-Item .env.example .env
 pip install -r requirements.txt
-python -m uvicorn app:app --reload
+pip install -e . --no-deps
+python -m uvicorn admissions_rag_assistant.app:app --reload
 ```
 
 On Linux/macOS, activate with `source .venv/bin/activate` and copy the environment
@@ -293,7 +295,7 @@ Run Telegram separately only when no other deployment is polling with the same
 token:
 
 ```shell
-python telegram_bot.py
+python -m admissions_rag_assistant.telegram_bot
 ```
 
 ## SQLite persistence and reset
@@ -310,7 +312,7 @@ Tests use temporary databases, temporary upload directories, fake embeddings, an
 mocked Gemini/OpenAI/Telegram calls:
 
 ```shell
-python -m pytest test_chat_integration.py -q
+python -m pytest tests/test_chat_integration.py -q
 python -m pytest -q
 python -m compileall -x ".venv" .
 docker compose config --quiet

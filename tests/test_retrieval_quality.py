@@ -7,14 +7,14 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from embedding_retriever import (
+from admissions_rag_assistant.embedding_retriever import (
     MAX_LEXICAL_RANKING_BONUS,
     build_retrieval_diagnostics,
     calculate_lexical_score,
     find_relevant_chunks_semantic,
     normalize_retrieval_query,
 )
-from retrieval_settings import (
+from admissions_rag_assistant.retrieval_settings import (
     CONTEXT_SCORE_MARGIN,
     SEMANTIC_FALLBACK_SCORE_THRESHOLD,
     SEMANTIC_SCORE_THRESHOLD,
@@ -80,7 +80,7 @@ def test_lexical_ranking_prefers_specific_faqs_without_bypassing_threshold():
         chunk(3, 0.19, faq_id=103, question="Application deadlines", answer="Exact topic."),
     ]
     model = CountingModel()
-    with patch("embedding_retriever.get_embedding_model", return_value=model):
+    with patch("admissions_rag_assistant.embedding_retriever.get_embedding_model", return_value=model):
         deadline = find_relevant_chunks_semantic(
             "deadline", chunks, min_score=0.20, fallback_score_threshold=None
         )
@@ -91,7 +91,7 @@ def test_lexical_ranking_prefers_specific_faqs_without_bypassing_threshold():
 
 def test_context_margin_keeps_similar_results_and_drops_weak_ones():
     chunks = [chunk(1, 0.50), chunk(2, 0.45), chunk(3, 0.30)]
-    with patch("embedding_retriever.get_embedding_model", return_value=CountingModel()):
+    with patch("admissions_rag_assistant.embedding_retriever.get_embedding_model", return_value=CountingModel()):
         results = find_relevant_chunks_semantic(
             "specific", chunks, min_score=0.20, context_score_margin=0.12, top_k=5
         )
@@ -103,7 +103,7 @@ def test_exact_match_is_preserved_outside_margin_and_no_accepted_candidate():
         chunk(1, 0.60),
         chunk(2, 0.10, faq_id=202, question="Exact question", answer="Exact answer"),
     ]
-    with patch("embedding_retriever.get_embedding_model", return_value=CountingModel()):
+    with patch("admissions_rag_assistant.embedding_retriever.get_embedding_model", return_value=CountingModel()):
         results = find_relevant_chunks_semantic("Exact question", chunks, min_score=0.20)
         none = find_relevant_chunks_semantic("Other", [chunk(3, 0.10)], min_score=0.20)
     assert [item["chunk_id"] for item in results] == [2]
@@ -112,7 +112,7 @@ def test_exact_match_is_preserved_outside_margin_and_no_accepted_candidate():
 
 def test_faq_fields_are_preserved():
     faq = chunk(1, 0.8, faq_id=301, question="Original question?", answer="Original answer.")
-    with patch("embedding_retriever.get_embedding_model", return_value=CountingModel()):
+    with patch("admissions_rag_assistant.embedding_retriever.get_embedding_model", return_value=CountingModel()):
         result = find_relevant_chunks_semantic("Original question?", [faq], min_score=0.20)[0]
     assert result["question"] == faq["question"]
     assert result["answer"] == faq["answer"]
@@ -125,7 +125,7 @@ def test_deterministic_tie_breaking_uses_faq_or_chunk_id():
         chunk(8, 0.5, faq_id=20, question="Topic", answer="Answer"),
         chunk(7, 0.5, faq_id=10, question="Topic", answer="Answer"),
     ]
-    with patch("embedding_retriever.get_embedding_model", return_value=CountingModel()):
+    with patch("admissions_rag_assistant.embedding_retriever.get_embedding_model", return_value=CountingModel()):
         diagnostics = build_retrieval_diagnostics("Other", chunks)
     assert [item["faq_id"] for item in diagnostics] == [10, 20]
 
@@ -138,7 +138,7 @@ def test_retrieval_constants_and_margin_are_unchanged_or_expected():
 
 
 def test_context_margin_validation():
-    with patch("embedding_retriever.get_embedding_model", return_value=CountingModel()):
+    with patch("admissions_rag_assistant.embedding_retriever.get_embedding_model", return_value=CountingModel()):
         with pytest.raises(ValueError):
             find_relevant_chunks_semantic("x", [chunk(1, 0.5)], context_score_margin=float("nan"))
 
@@ -146,7 +146,7 @@ def test_context_margin_validation():
 def test_read_only_index_audit(tmp_path, monkeypatch):
     database_path = tmp_path / "audit.db"
     monkeypatch.setenv("DATABASE_PATH", str(database_path))
-    import database
+    from admissions_rag_assistant import database
     database = importlib.reload(database)
     database.initialize_database()
     document_id = database.insert_document_with_chunks(
@@ -164,7 +164,7 @@ def test_read_only_index_audit(tmp_path, monkeypatch):
 def test_evaluator_reports_expected_metrics(tmp_path, monkeypatch):
     database_path = tmp_path / "evaluation.db"
     monkeypatch.setenv("DATABASE_PATH", str(database_path))
-    import database
+    from admissions_rag_assistant import database
     database = importlib.reload(database)
     database.initialize_database()
     document_id = database.insert_document_with_chunks(

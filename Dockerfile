@@ -18,9 +18,10 @@ RUN useradd --create-home --shell /usr/sbin/nologin appuser && \
     chown -R appuser:appuser /app /data /home/appuser
 
 COPY --chown=appuser:appuser . .
+RUN python -m pip install -e . --no-deps
 
 USER appuser
 
 EXPOSE 8000
 
-CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "uvicorn", "admissions_rag_assistant.app:app", "--host", "0.0.0.0", "--port", "8000"]

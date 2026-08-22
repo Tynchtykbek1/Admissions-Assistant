@@ -6,12 +6,12 @@ from collections import OrderedDict
 from dataclasses import replace
 from threading import Lock
 
-from app_settings import CHAT_HISTORY_CHARACTER_LIMIT, CHAT_HISTORY_LIMIT, DOCUMENT_CACHE_SIZE
-from conversation_service import resolve_conversation
-from database import add_message, get_document, get_recent_messages, load_document_chunks, record_unanswered_question
-from embedding_retriever import find_relevant_chunks_semantic
-from llm_answer_generator import INSUFFICIENT_DOCUMENT_INFORMATION, INSUFFICIENT_INFORMATION_ANSWER, PROVIDER_UNAVAILABLE, SUCCESS, generate_conversation_answer
-from retrieval_settings import CONTEXT_SCORE_MARGIN, SEMANTIC_FALLBACK_SCORE_THRESHOLD, SEMANTIC_SCORE_THRESHOLD, SEMANTIC_TOP_K
+from .app_settings import CHAT_HISTORY_CHARACTER_LIMIT, CHAT_HISTORY_LIMIT, DOCUMENT_CACHE_SIZE
+from .conversation_service import resolve_conversation
+from .database import add_message, get_document, get_recent_messages, load_document_chunks, record_unanswered_question
+from .embedding_retriever import find_relevant_chunks_semantic
+from .llm_answer_generator import INSUFFICIENT_DOCUMENT_INFORMATION, INSUFFICIENT_INFORMATION_ANSWER, PROVIDER_UNAVAILABLE, SUCCESS, generate_conversation_answer
+from .retrieval_settings import CONTEXT_SCORE_MARGIN, SEMANTIC_FALLBACK_SCORE_THRESHOLD, SEMANTIC_SCORE_THRESHOLD, SEMANTIC_TOP_K
 
 
 logger = logging.getLogger(__name__)

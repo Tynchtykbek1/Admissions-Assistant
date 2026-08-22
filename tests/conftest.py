@@ -5,9 +5,9 @@ import numpy as np
 import pytest
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+SOURCE_ROOT = Path(__file__).resolve().parents[1] / "src"
+if str(SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SOURCE_ROOT))
 
 
 class _OfflineEmbeddingModel:
@@ -19,7 +19,7 @@ class _OfflineEmbeddingModel:
 
 @pytest.fixture(autouse=True)
 def _prevent_model_downloads(monkeypatch):
-    import embedding_model
+    from admissions_rag_assistant import embedding_model
 
     embedding_model.load_embedding_model.cache_clear()
     monkeypatch.setattr(

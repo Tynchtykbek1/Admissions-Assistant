@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from google.genai import types
 
-import llm_answer_generator as llm
+from admissions_rag_assistant import llm_answer_generator as llm
 
 
 LANGUAGE_RULE = "Respond in the language of CURRENT_MESSAGE."
@@ -23,7 +23,7 @@ def _native_tool_response():
 def test_gemini_initial_and_final_calls_include_language_rule(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
     monkeypatch.setenv("GEMINI_MODEL", "fake-model")
-    with patch("llm_answer_generator.genai.Client") as client_factory:
+    with patch("admissions_rag_assistant.llm_answer_generator.genai.Client") as client_factory:
         client = client_factory.return_value
         client.models.generate_content.side_effect = [
             _native_tool_response(),

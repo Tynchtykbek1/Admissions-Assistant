@@ -4,7 +4,7 @@ import json
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
-from llm_answer_generator import ConversationLLMResult, INSUFFICIENT_INFORMATION_ANSWER
+from admissions_rag_assistant.llm_answer_generator import ConversationLLMResult, INSUFFICIENT_INFORMATION_ANSWER
 
 
 SYNTHETIC_CHUNK = {
@@ -33,11 +33,11 @@ def load_test_app(tmp_path, monkeypatch, *, with_document=True):
     monkeypatch.setenv("GEMINI_API_KEY", "fake-gemini-key-for-tests")
     monkeypatch.setenv("GEMINI_MODEL", "fake-gemini-model")
     monkeypatch.setenv("SYSTEM_DOCUMENT_ID", "1")
-    import app_settings
-    import database
-    import conversation_service
-    import rag_service
-    import app
+    from admissions_rag_assistant import app_settings
+    from admissions_rag_assistant import database
+    from admissions_rag_assistant import conversation_service
+    from admissions_rag_assistant import rag_service
+    from admissions_rag_assistant import app
 
     importlib.reload(app_settings)
     database = importlib.reload(database)
@@ -53,7 +53,7 @@ def load_test_app(tmp_path, monkeypatch, *, with_document=True):
             [SYNTHETIC_CHUNK],
         )
     rag_service.invalidate_document_cache()
-    monkeypatch.setattr("embedding_retriever.get_embedding_model", lambda: FakeModel())
+    monkeypatch.setattr("admissions_rag_assistant.embedding_retriever.get_embedding_model", lambda: FakeModel())
     return app
 
 
@@ -64,7 +64,7 @@ def test_chat_success_has_conversation_status_timings_and_sources(
     def answer(_question, _history, search):
         output = search("What is the deadline?")
         return ConversationLLMResult("The deadline is 30 April.", "success", "gemini", 1.0, True, "search_knowledge", "What is the deadline?", output)
-    monkeypatch.setattr("rag_service.generate_conversation_answer", answer)
+    monkeypatch.setattr("admissions_rag_assistant.rag_service.generate_conversation_answer", answer)
 
     with TestClient(app_module.app) as client:
         response = client.post(
@@ -85,7 +85,7 @@ def test_empty_retrieval_cannot_return_success_or_unsupported_answer(
     tmp_path, monkeypatch
 ):
     app_module = load_test_app(tmp_path, monkeypatch)
-    monkeypatch.setattr("rag_service.find_relevant_chunks_semantic", lambda **_kwargs: [])
+    monkeypatch.setattr("admissions_rag_assistant.rag_service.find_relevant_chunks_semantic", lambda **_kwargs: [])
 
     def answer(_question, _history, search):
         output = search("What is the tuition fee?")
@@ -100,7 +100,7 @@ def test_empty_retrieval_cannot_return_success_or_unsupported_answer(
             output,
         )
 
-    monkeypatch.setattr("rag_service.generate_conversation_answer", answer)
+    monkeypatch.setattr("admissions_rag_assistant.rag_service.generate_conversation_answer", answer)
 
     with TestClient(app_module.app) as client:
         response = client.post(
@@ -119,7 +119,7 @@ def test_empty_retrieval_cannot_return_success_or_unsupported_answer(
 
 def test_provider_429_returns_controlled_503(tmp_path, monkeypatch):
     app_module = load_test_app(tmp_path, monkeypatch)
-    monkeypatch.setattr("rag_service.generate_conversation_answer", lambda *_args: ConversationLLMResult("Unavailable", "provider_unavailable", "gemini", 1.0))
+    monkeypatch.setattr("admissions_rag_assistant.rag_service.generate_conversation_answer", lambda *_args: ConversationLLMResult("Unavailable", "provider_unavailable", "gemini", 1.0))
     with TestClient(app_module.app) as client:
         response = client.post(
             "/chat",
@@ -133,11 +133,11 @@ def test_provider_429_returns_controlled_503(tmp_path, monkeypatch):
 def test_missing_system_document_is_controlled_for_telegram(tmp_path, monkeypatch):
     app_module = load_test_app(tmp_path, monkeypatch, with_document=False)
     monkeypatch.setattr(
-        "rag_service.generate_conversation_answer",
+        "admissions_rag_assistant.rag_service.generate_conversation_answer",
         lambda *_args: pytest.fail("LLM/provider must not be called"),
     )
     monkeypatch.setattr(
-        "rag_service.find_relevant_chunks_semantic",
+        "admissions_rag_assistant.rag_service.find_relevant_chunks_semantic",
         lambda **_kwargs: pytest.fail("retrieval must not be called"),
     )
     with TestClient(app_module.app) as client:

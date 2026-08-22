@@ -1,16 +1,10 @@
 import argparse
 import os
 import sqlite3
-import sys
 from pathlib import Path
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-from database import get_database_path
-from embedding_model import get_embedding_model_name
+from admissions_rag_assistant.database import get_database_path
+from admissions_rag_assistant.embedding_model import get_embedding_model_name
 
 
 def audit_document_index(document_id: int, database: Path | None = None) -> dict:

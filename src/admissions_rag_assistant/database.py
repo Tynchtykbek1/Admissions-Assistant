@@ -10,7 +10,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from embedding_model import get_embedding_model, get_embedding_model_name
+from .embedding_model import get_embedding_model, get_embedding_model_name
 
 
 load_dotenv()
@@ -356,7 +356,7 @@ def count_document_chunks(document_id: int) -> int:
 
 
 def load_document_chunks(document_id: int) -> list[dict]:
-    from knowledge_importer import parse_knowledge_marker
+    from .knowledge_importer import parse_knowledge_marker
     with closing(get_connection()) as connection:
         document = connection.execute(
             "SELECT embedding_model_name, document_type FROM documents WHERE id = ?",

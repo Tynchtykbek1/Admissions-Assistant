@@ -7,10 +7,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import database
-from embedding_retriever import find_relevant_chunks_semantic
-from knowledge_importer import import_knowledge_pack
-from knowledge_validator import KnowledgeValidationError, validate_knowledge_pack
+from admissions_rag_assistant import database
+from admissions_rag_assistant.embedding_retriever import find_relevant_chunks_semantic
+from admissions_rag_assistant.knowledge_importer import import_knowledge_pack
+from admissions_rag_assistant.knowledge_validator import KnowledgeValidationError, validate_knowledge_pack
 
 
 KNOWLEDGE_PACK = Path(__file__).resolve().parents[1] / "knowledge" / "company_demo.json"
@@ -180,7 +180,7 @@ def test_embedding_failure_leaves_database_unchanged(knowledge_database, monkeyp
     class BrokenModel:
         def encode(self, *_args, **_kwargs):
             raise RuntimeError("embedding failed")
-    monkeypatch.setattr("knowledge_importer.get_embedding_model", lambda: BrokenModel())
+    monkeypatch.setattr("admissions_rag_assistant.knowledge_importer.get_embedding_model", lambda: BrokenModel())
     with pytest.raises(RuntimeError, match="embedding failed"):
         import_knowledge_pack([record()], path, "company-demo", base_id, apply=True)
     with sqlite3.connect(path) as connection:
@@ -196,7 +196,7 @@ def test_new_version_replaces_record_and_rollback_is_atomic(knowledge_database, 
     assert updated.document_id == first.document_id and updated.unchanged is False
     with sqlite3.connect(path) as connection:
         before = connection.execute("SELECT text FROM chunks WHERE document_id=? ORDER BY id", (first.document_id,)).fetchall()
-    monkeypatch.setattr("knowledge_importer._insert_rows", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr("admissions_rag_assistant.knowledge_importer._insert_rows", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
     with pytest.raises(RuntimeError, match="boom"):
         import_knowledge_pack([record(version=3)], path, "company-demo", base_id, apply=True)
     with sqlite3.connect(path) as connection:

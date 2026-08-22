@@ -12,8 +12,8 @@ class FakeModel:
 
 def load_upload_app(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "uploads.db"))
-    import database
-    import app
+    from admissions_rag_assistant import database
+    from admissions_rag_assistant import app
 
     database = importlib.reload(database)
     app = importlib.reload(app)

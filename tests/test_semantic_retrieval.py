@@ -3,13 +3,13 @@ from unittest.mock import patch
 
 import numpy as np
 
-from embedding_retriever import (
+from admissions_rag_assistant.embedding_retriever import (
     build_retrieval_diagnostics,
     find_relevant_chunks_semantic,
     normalize_faq_question,
     normalize_retrieval_query,
 )
-from retrieval_settings import SEMANTIC_SCORE_THRESHOLD, SEMANTIC_TOP_K
+from admissions_rag_assistant.retrieval_settings import SEMANTIC_SCORE_THRESHOLD, SEMANTIC_TOP_K
 
 
 FAQ_ITEMS = [
@@ -94,7 +94,7 @@ class MultilingualRetrievalTests(unittest.TestCase):
         cls.model = SyntheticMultilingualModel()
         cls.chunks = build_synthetic_multilingual_chunks(cls.model)
         cls.model_patch = patch(
-            "embedding_retriever.get_embedding_model",
+            "admissions_rag_assistant.embedding_retriever.get_embedding_model",
             return_value=cls.model,
         )
         cls.model_patch.start()
@@ -227,7 +227,7 @@ class DeterministicHybridRankingTests(unittest.TestCase):
         ]
 
     def retrieve(self, question):
-        with patch("embedding_retriever.get_embedding_model", return_value=self.FakeModel()):
+        with patch("admissions_rag_assistant.embedding_retriever.get_embedding_model", return_value=self.FakeModel()):
             return find_relevant_chunks_semantic(question, self.chunks, top_k=3, min_score=0.0)
 
     def test_normalization(self):
@@ -253,7 +253,7 @@ class DeterministicHybridRankingTests(unittest.TestCase):
         self.assertEqual(results[0]["faq_match_type"], "exact")
 
     def test_unrelated_faq_has_no_match_boost(self):
-        with patch("embedding_retriever.get_embedding_model", return_value=self.FakeModel()):
+        with patch("admissions_rag_assistant.embedding_retriever.get_embedding_model", return_value=self.FakeModel()):
             result = next(
                 item for item in build_retrieval_diagnostics("Какие дедлайны?", self.chunks)
                 if item.get("faq_id") == 2
@@ -262,7 +262,7 @@ class DeterministicHybridRankingTests(unittest.TestCase):
         self.assertEqual(result["faq_match_boost"], 0.0)
 
     def test_non_faq_chunk_uses_semantic_score_only(self):
-        with patch("embedding_retriever.get_embedding_model", return_value=self.FakeModel()):
+        with patch("admissions_rag_assistant.embedding_retriever.get_embedding_model", return_value=self.FakeModel()):
             result = next(
                 item for item in build_retrieval_diagnostics("Какие дедлайны?", self.chunks)
                 if item["index"] == 2
@@ -271,7 +271,7 @@ class DeterministicHybridRankingTests(unittest.TestCase):
         self.assertEqual(result["final_score"], result["score"])
 
     def test_diagnostics_include_rank_and_query_forms(self):
-        with patch("embedding_retriever.get_embedding_model", return_value=self.FakeModel()):
+        with patch("admissions_rag_assistant.embedding_retriever.get_embedding_model", return_value=self.FakeModel()):
             diagnostics = build_retrieval_diagnostics("Доки", self.chunks)
         self.assertEqual(diagnostics[0]["original_query"], "Доки")
         self.assertEqual(diagnostics[0]["retrieval_query"], "документы")

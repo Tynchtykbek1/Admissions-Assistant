@@ -4,18 +4,18 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-import app_settings
+from . import app_settings
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
-from api_models import QuestionRequest, ResetRequest
-from app_settings import (
+from .api_models import QuestionRequest, ResetRequest
+from .app_settings import (
     MAX_UPLOAD_SIZE_BYTES,
     MAX_UPLOAD_SIZE_MB,
     UPLOAD_READ_CHUNK_SIZE,
 )
-from conversation_service import (
+from .conversation_service import (
     DocumentSelectionConflict,
     SystemDocumentUnavailable,
     TelegramIdentityRequired,
@@ -25,23 +25,23 @@ from conversation_service import (
     resolve_conversation,
     synchronize_system_document_conversations,
 )
-from database import (
+from .database import (
     ConversationIdentityMismatch,
     database_is_ready,
     get_document,
     initialize_database,
     insert_document_with_chunks,
 )
-from document_processor import (
+from .document_processor import (
     extract_text_from_pdf,
     extract_text_from_txt,
     parse_faq_entries,
     split_text_into_chunks,
 )
-from embedding_model import get_embedding_model, get_embedding_model_name
-from llm_answer_generator import PROVIDER_UNAVAILABLE
-from logging_config import configure_logging
-from rag_service import (
+from .embedding_model import get_embedding_model, get_embedding_model_name
+from .llm_answer_generator import PROVIDER_UNAVAILABLE
+from .logging_config import configure_logging
+from .rag_service import (
     SYSTEM_DOCUMENT_UNAVAILABLE,
     SYSTEM_DOCUMENT_UNAVAILABLE_ANSWER,
     answer_conversation_question,

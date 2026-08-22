@@ -54,9 +54,9 @@ def test_invalid_configured_document_fails_before_provider_and_preserves_source(
     )
     monkeypatch.setenv("RUN_LIVE_LLM_TESTS", "1")
     monkeypatch.setenv("DATABASE_PATH", str(source))
-    monkeypatch.setitem(sys.modules, "app_settings", settings)
-    monkeypatch.setitem(sys.modules, "database", database)
-    monkeypatch.setitem(sys.modules, "rag_service", rag_service)
+    monkeypatch.setitem(sys.modules, "admissions_rag_assistant.app_settings", settings)
+    monkeypatch.setitem(sys.modules, "admissions_rag_assistant.database", database)
+    monkeypatch.setitem(sys.modules, "admissions_rag_assistant.rag_service", rag_service)
 
     assert smoke.main() == 2
     assert provider_calls == []
@@ -88,14 +88,14 @@ def test_smoke_uses_database_copy_and_leaves_source_untouched(tmp_path, monkeypa
 
     monkeypatch.setenv("RUN_LIVE_LLM_TESTS", "1")
     monkeypatch.setenv("DATABASE_PATH", str(source))
-    monkeypatch.setitem(sys.modules, "app_settings", SimpleNamespace(
+    monkeypatch.setitem(sys.modules, "admissions_rag_assistant.app_settings", SimpleNamespace(
         SYSTEM_DOCUMENT_ID=13, SYSTEM_DOCUMENT_ID_INVALID=False
     ))
-    monkeypatch.setitem(sys.modules, "database", SimpleNamespace(
+    monkeypatch.setitem(sys.modules, "admissions_rag_assistant.database", SimpleNamespace(
         get_document=get_document,
         count_document_chunks=lambda _document_id: 1,
     ))
-    monkeypatch.setitem(sys.modules, "rag_service", SimpleNamespace(
+    monkeypatch.setitem(sys.modules, "admissions_rag_assistant.rag_service", SimpleNamespace(
         answer_conversation_question=answer_conversation_question
     ))
 

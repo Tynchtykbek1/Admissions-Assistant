@@ -1,6 +1,6 @@
 import unittest
 
-from document_processor import parse_faq_entries, split_text_into_chunks
+from admissions_rag_assistant.document_processor import parse_faq_entries, split_text_into_chunks
 
 
 class FaqParserTests(unittest.TestCase):

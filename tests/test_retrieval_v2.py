@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from retrieval_reranker import (
+from admissions_rag_assistant.retrieval_reranker import (
     infer_chunk_categories,
     infer_query_categories,
     retrieve_relevant_chunks,
@@ -47,7 +47,7 @@ CATALOG = [
 
 
 def retrieve(question: str, intent: str):
-    with patch("embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
+    with patch("admissions_rag_assistant.embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
         return retrieve_relevant_chunks(
             question,
             CATALOG,
@@ -68,7 +68,7 @@ def test_company_pricing_blocks_adjacent_amounts():
 
 
 def test_company_pricing_is_empty_without_company_context():
-    with patch("embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
+    with patch("admissions_rag_assistant.embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
         result = retrieve_relevant_chunks(
             "Сколько стоят ваши услуги?", CATALOG[1:5],
             intent="company_pricing", risk_level="high",
@@ -208,7 +208,7 @@ def test_multitopic_service_faq_keeps_question_domain_when_answer_mentions_visa(
         100, 0.8, "Что входит в услуги компании?",
         "Мы помогаем с поступлением и объясняем дальнейшие визовые шаги.",
     )
-    with patch("embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
+    with patch("admissions_rag_assistant.embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
         result = retrieve_relevant_chunks(
             "Что входит в услуги компании?", [chunk],
             intent="company_services", risk_level="high",
@@ -222,7 +222,7 @@ def test_multitopic_documents_faq_uses_question_as_primary_domain():
         101, 0.9, "Какие документы подать в университет?",
         "После зачисления эти документы также могут понадобиться для визы.",
     )
-    with patch("embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
+    with patch("admissions_rag_assistant.embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
         university = retrieve_relevant_chunks(
             "Документы для университета", [chunk], intent="documents", risk_level="high"
         )
@@ -240,7 +240,7 @@ def test_multitopic_documents_faq_uses_question_as_primary_domain():
 def test_amount_is_not_automatically_a_price(question, answer, category):
     chunk = faq(102, 0.9, question, answer)
     assert category in infer_chunk_categories(chunk)
-    with patch("embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
+    with patch("admissions_rag_assistant.embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
         pricing = retrieve_relevant_chunks(
             "Сколько стоят услуги компании?", [chunk],
             intent="company_pricing", risk_level="high",
@@ -250,7 +250,7 @@ def test_amount_is_not_automatically_a_price(question, answer, category):
 
 def test_fusion_deduplicates_duplicate_chunk_identity():
     duplicate = faq(103, 0.9, "Сколько стоит CEnT?", "Стоимость экзамена указана здесь.")
-    with patch("embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
+    with patch("admissions_rag_assistant.embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
         result = retrieve_relevant_chunks(
             "Сколько стоит CEnT?", [duplicate, dict(duplicate)],
             intent="company_pricing", risk_level="high",
@@ -265,7 +265,7 @@ def test_legacy_chunk_without_faq_id_is_supported():
         "text_for_retrieval": "Visa documents include a passport.",
         "embedding": np.array([0.9, 0.0]),
     }
-    with patch("embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
+    with patch("admissions_rag_assistant.embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
         result = retrieve_relevant_chunks(
             "Which visa documents?", [chunk], intent="visa", risk_level="high"
         )
@@ -278,7 +278,7 @@ def test_missing_question_and_answer_do_not_crash():
         "chunk_id": 105, "filename": "legacy.txt", "text": "General text.",
         "text_for_retrieval": "General text.", "embedding": np.array([0.8, 0.0]),
     }
-    with patch("embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
+    with patch("admissions_rag_assistant.embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
         result = retrieve_relevant_chunks(
             "Unrelated question", [chunk], intent="unknown", risk_level="high"
         )
@@ -291,7 +291,7 @@ def test_equal_score_order_is_deterministic_by_faq_id():
         faq(110, 0.8, "Что входит в услуги компании?", "Описание услуг."),
         faq(109, 0.8, "Что входит в услуги компании?", "Описание услуг."),
     ]
-    with patch("embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
+    with patch("admissions_rag_assistant.embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
         result = retrieve_relevant_chunks(
             "Что входит в услуги компании?", chunks,
             intent="company_services", risk_level="high",
@@ -329,7 +329,7 @@ def test_collecting_proof_of_funds_is_not_a_visa_fee():
     assert "financial_means" in infer_chunk_categories(chunk)
     assert "visa_fee" not in infer_chunk_categories(chunk)
 
-    with patch("embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
+    with patch("admissions_rag_assistant.embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
         result = retrieve_relevant_chunks(
             "Сколько всего нужно денег: услуги, виза и обучение?", [chunk],
             intent="company_pricing", risk_level="high",
@@ -370,7 +370,7 @@ def test_real_corpus_fixture_has_reviewable_contract_without_faq_text_copy():
 
 def test_exact_match_ranking_score_does_not_make_confidence_exceed_one():
     exact = faq(120, 1.0, "Что входит в услуги компании?", "Описание услуг.")
-    with patch("embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
+    with patch("admissions_rag_assistant.embedding_retriever.get_embedding_model", return_value=FixedQueryModel()):
         result = retrieve_relevant_chunks(
             "Что входит в услуги компании?", [exact],
             intent="company_services", risk_level="high",

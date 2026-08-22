@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from telegram_bot import ask_backend
-from telegram_settings import BACKEND_TIMEOUT_DEFAULTS, load_backend_timeout
+from admissions_rag_assistant.telegram_bot import ask_backend
+from admissions_rag_assistant.telegram_settings import BACKEND_TIMEOUT_DEFAULTS, load_backend_timeout
 
 
 TIMEOUT_ENVIRONMENT_VARIABLES = tuple(BACKEND_TIMEOUT_DEFAULTS)
@@ -61,7 +61,7 @@ def test_chat_post_is_not_retried_after_read_timeout():
     context_manager.__aexit__.return_value = False
 
     async def run_request():
-        with patch("telegram_bot.httpx.AsyncClient", return_value=context_manager):
+        with patch("admissions_rag_assistant.telegram_bot.httpx.AsyncClient", return_value=context_manager):
             with pytest.raises(httpx.ReadTimeout):
                 await ask_backend("question", "chat", "user")
 

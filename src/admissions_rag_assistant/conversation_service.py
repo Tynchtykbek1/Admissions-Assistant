@@ -1,8 +1,8 @@
 import logging
 from dataclasses import dataclass
 
-import app_settings
-from database import (
+from . import app_settings
+from .database import (
     clear_conversation_messages,
     count_document_chunks,
     get_document,

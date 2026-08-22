@@ -9,8 +9,8 @@ def test_health_uses_temporary_database_without_loading_embedding_model(
     temporary_database = tmp_path / "health_test.db"
     monkeypatch.setenv("DATABASE_PATH", str(temporary_database))
 
-    import database
-    import app
+    from admissions_rag_assistant import database
+    from admissions_rag_assistant import app
 
     importlib.reload(database)
     app_module = importlib.reload(app)
@@ -26,8 +26,8 @@ def test_health_uses_temporary_database_without_loading_embedding_model(
 
 def test_browser_ui_is_not_exposed(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "no-ui.db"))
-    import database
-    import app
+    from admissions_rag_assistant import database
+    from admissions_rag_assistant import app
 
     importlib.reload(database)
     app_module = importlib.reload(app)
@@ -44,8 +44,8 @@ def test_ready_checks_database_and_configuration_without_provider_call(
     monkeypatch.setenv("LLM_PROVIDER", "gemini")
     monkeypatch.setenv("GEMINI_API_KEY", "")
     monkeypatch.setenv("GEMINI_MODEL", "model")
-    import database
-    import app
+    from admissions_rag_assistant import database
+    from admissions_rag_assistant import app
 
     importlib.reload(database)
     app_module = importlib.reload(app)
@@ -60,8 +60,8 @@ def test_ready_checks_database_and_configuration_without_provider_call(
 def test_demo_mode_is_explicitly_reported(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "demo-health.db"))
     monkeypatch.setenv("DEMO_MODE", "true")
-    import database
-    import app
+    from admissions_rag_assistant import database
+    from admissions_rag_assistant import app
     importlib.reload(database)
     app_module = importlib.reload(app)
     with TestClient(app_module.app) as client:

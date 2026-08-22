@@ -1,5 +1,6 @@
 """Local real-provider smoke on an isolated SQLite copy."""
 import json
+import importlib
 import os
 import shutil
 import sys
@@ -36,7 +37,6 @@ def main() -> int:
         print("Refusing to run: set RUN_LIVE_LLM_TESTS=1 explicitly.")
         return 2
     project = Path(__file__).resolve().parents[1]
-    sys.path.insert(0, str(project))
     from dotenv import load_dotenv
     load_dotenv(project / ".env")
     source = Path(os.getenv("DATABASE_PATH", project / "admissions.db"))
@@ -46,9 +46,9 @@ def main() -> int:
         temporary = Path(directory) / "smoke.db"
         shutil.copy2(source, temporary)
         os.environ["DATABASE_PATH"] = str(temporary)
-        import app_settings
-        import database
-        import rag_service
+        app_settings = importlib.import_module("admissions_rag_assistant.app_settings")
+        database = importlib.import_module("admissions_rag_assistant.database")
+        rag_service = importlib.import_module("admissions_rag_assistant.rag_service")
         try:
             document_id = resolve_system_document(database, app_settings)
         except RuntimeError as error:

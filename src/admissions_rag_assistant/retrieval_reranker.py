@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
-from embedding_retriever import build_retrieval_diagnostics, normalized_lexical_tokens
-from retrieval_settings import (
+from .embedding_retriever import build_retrieval_diagnostics, normalized_lexical_tokens
+from .retrieval_settings import (
     HYBRID_CATEGORY_CONFLICT_PENALTY,
     HYBRID_CONTEXT_SCORE_MARGIN,
     HYBRID_EXACT_QUESTION_BONUS,

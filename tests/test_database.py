@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-import database
+from admissions_rag_assistant import database
 
 
 class DatabaseCompatibilityTests(unittest.TestCase):

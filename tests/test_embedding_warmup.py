@@ -20,7 +20,7 @@ def _make_readiness_dependencies_available(monkeypatch, app_module):
 
 
 def test_embedding_initializes_once_and_warms_up_during_startup(monkeypatch):
-    import app
+    from admissions_rag_assistant import app
 
     model = WarmupModel()
     loader = Mock(return_value=model)
@@ -39,7 +39,7 @@ def test_embedding_initializes_once_and_warms_up_during_startup(monkeypatch):
 
 
 def test_ready_succeeds_only_after_successful_warmup(monkeypatch):
-    import app
+    from admissions_rag_assistant import app
 
     _make_readiness_dependencies_available(monkeypatch, app)
     monkeypatch.setattr(app, "get_embedding_model", lambda: WarmupModel())
@@ -54,7 +54,7 @@ def test_ready_succeeds_only_after_successful_warmup(monkeypatch):
 
 
 def test_failed_warmup_keeps_ready_unavailable(monkeypatch):
-    import app
+    from admissions_rag_assistant import app
 
     _make_readiness_dependencies_available(monkeypatch, app)
 

@@ -16,7 +16,7 @@ from scripts.export_unanswered_questions import (
 def export_database(tmp_path, monkeypatch):
     database_path = tmp_path / "export.db"
     monkeypatch.setenv("DATABASE_PATH", str(database_path))
-    import database
+    from admissions_rag_assistant import database
     database = importlib.reload(database)
     database.initialize_database()
 

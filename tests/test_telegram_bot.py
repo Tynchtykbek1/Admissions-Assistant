@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 from telegram.constants import ChatAction, ParseMode
 
-from telegram_bot import (
+from admissions_rag_assistant.telegram_bot import (
     ERROR_MESSAGES,
     HELP_MESSAGES,
     NO_INFORMATION_MESSAGES,
@@ -175,7 +175,7 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
             "sources": [],
         }
         with patch(
-            "telegram_bot.ask_backend",
+            "admissions_rag_assistant.telegram_bot.ask_backend",
             new=AsyncMock(return_value=backend_result),
         ) as backend:
             await handle_question(update, SimpleNamespace())
@@ -184,7 +184,7 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
     async def test_greeting_with_question_calls_backend(self):
         update = make_update("Привет, какие документы нужны для поступления?")
         backend_result = {"answer": "Нужен паспорт.", "sources": []}
-        with patch("telegram_bot.ask_backend", new=AsyncMock(return_value=backend_result)) as backend:
+        with patch("admissions_rag_assistant.telegram_bot.ask_backend", new=AsyncMock(return_value=backend_result)) as backend:
             await handle_question(update, SimpleNamespace())
         backend.assert_awaited_once_with(update.message.text, "123", "456", None)
         update.effective_chat.send_action.assert_awaited_with(action=ChatAction.TYPING)
@@ -199,7 +199,7 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
             "conversation_id": "updated",
         }
         with patch(
-            "telegram_bot.ask_backend", new=AsyncMock(return_value=result)
+            "admissions_rag_assistant.telegram_bot.ask_backend", new=AsyncMock(return_value=result)
         ) as backend:
             await handle_question(update, context)
         backend.assert_awaited_once_with(
@@ -215,7 +215,7 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
         }
         for question, language in (("Какие требования?", "ru"), ("What are the requirements?", "en")):
             update = make_update(question)
-            with patch("telegram_bot.ask_backend", new=AsyncMock(return_value=backend_result)):
+            with patch("admissions_rag_assistant.telegram_bot.ask_backend", new=AsyncMock(return_value=backend_result)):
                 await handle_question(update, SimpleNamespace())
             self.assertEqual(update.message.reply_text.await_args.args[0], NO_INFORMATION_MESSAGES[language])
 
@@ -232,7 +232,7 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
             }],
         }
         with patch(
-            "telegram_bot.ask_backend", new=AsyncMock(return_value=backend_result)
+            "admissions_rag_assistant.telegram_bot.ask_backend", new=AsyncMock(return_value=backend_result)
         ):
             await handle_question(update, SimpleNamespace())
         sent = update.message.reply_text.await_args.args[0]
@@ -248,7 +248,7 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
             "sources": [],
         }
         with patch(
-            "telegram_bot.ask_backend", new=AsyncMock(return_value=backend_result)
+            "admissions_rag_assistant.telegram_bot.ask_backend", new=AsyncMock(return_value=backend_result)
         ):
             await handle_question(update, SimpleNamespace())
         self.assertEqual(
@@ -259,7 +259,7 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
     async def test_localized_backend_error(self):
         for question, language in (("Какие требования?", "ru"), ("What requirements?", "en")):
             update = make_update(question)
-            with patch("telegram_bot.ask_backend", new=AsyncMock(side_effect=ValueError("bad"))):
+            with patch("admissions_rag_assistant.telegram_bot.ask_backend", new=AsyncMock(side_effect=ValueError("bad"))):
                 await handle_question(update, SimpleNamespace())
             self.assertEqual(update.message.reply_text.await_args.args[0], ERROR_MESSAGES[language])
 
@@ -271,8 +271,8 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
             return {"status": "success", "answer": "Passport.", "sources": []}
 
         with (
-            patch("telegram_bot.TYPING_INTERVAL_SECONDS", 0.01),
-            patch("telegram_bot.ask_backend", side_effect=delayed_backend),
+            patch("admissions_rag_assistant.telegram_bot.TYPING_INTERVAL_SECONDS", 0.01),
+            patch("admissions_rag_assistant.telegram_bot.ask_backend", side_effect=delayed_backend),
         ):
             await handle_question(update, SimpleNamespace())
 
@@ -290,8 +290,8 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
 
         import httpx
         with (
-            patch("telegram_bot.TYPING_INTERVAL_SECONDS", 0.01),
-            patch("telegram_bot.ask_backend", side_effect=failing_backend),
+            patch("admissions_rag_assistant.telegram_bot.TYPING_INTERVAL_SECONDS", 0.01),
+            patch("admissions_rag_assistant.telegram_bot.ask_backend", side_effect=failing_backend),
         ):
             await handle_question(update, SimpleNamespace())
 
@@ -321,8 +321,8 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
                 raise error
 
             with (
-                patch("telegram_bot.TYPING_INTERVAL_SECONDS", 0.005),
-                patch("telegram_bot.ask_backend", side_effect=failing_backend),
+                patch("admissions_rag_assistant.telegram_bot.TYPING_INTERVAL_SECONDS", 0.005),
+                patch("admissions_rag_assistant.telegram_bot.ask_backend", side_effect=failing_backend),
             ):
                 await handle_question(update, SimpleNamespace())
 
@@ -352,8 +352,8 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.Event().wait()
 
         with (
-            patch("telegram_bot.TYPING_INTERVAL_SECONDS", 0.01),
-            patch("telegram_bot.ask_backend", side_effect=pending_backend),
+            patch("admissions_rag_assistant.telegram_bot.TYPING_INTERVAL_SECONDS", 0.01),
+            patch("admissions_rag_assistant.telegram_bot.ask_backend", side_effect=pending_backend),
         ):
             handler_task = asyncio.create_task(handle_question(update, SimpleNamespace()))
             await backend_started.wait()
@@ -374,7 +374,7 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
         context = SimpleNamespace(chat_data={})
         result = {"conversation_id": "conversation-1", "cleared_messages": 2}
         with patch(
-            "telegram_bot.reset_backend", new=AsyncMock(return_value=result)
+            "admissions_rag_assistant.telegram_bot.reset_backend", new=AsyncMock(return_value=result)
         ) as backend:
             await reset_command(update, context)
         backend.assert_awaited_once_with("123", "456", None)
@@ -393,7 +393,7 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
             "active_document_filename": "FAQ.docx.pdf",
         }
         with patch(
-            "telegram_bot.backend_status",
+            "admissions_rag_assistant.telegram_bot.backend_status",
             new=AsyncMock(return_value=result),
         ) as backend:
             await status_command(update, context)
@@ -417,7 +417,7 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
 
         first = make_update("Question one", chat_id=900)
         second = make_update("Question two", chat_id=900)
-        with patch("telegram_bot.ask_backend", side_effect=backend):
+        with patch("admissions_rag_assistant.telegram_bot.ask_backend", side_effect=backend):
             await asyncio.gather(
                 handle_question(first, SimpleNamespace()),
                 handle_question(second, SimpleNamespace()),
@@ -438,7 +438,7 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
 
         first = make_update("Question one", chat_id=901)
         second = make_update("Question two", chat_id=902)
-        with patch("telegram_bot.ask_backend", side_effect=backend):
+        with patch("admissions_rag_assistant.telegram_bot.ask_backend", side_effect=backend):
             await asyncio.gather(
                 handle_question(first, SimpleNamespace()),
                 handle_question(second, SimpleNamespace()),

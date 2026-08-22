@@ -2,6 +2,7 @@ import copy
 import json
 import sqlite3
 import re
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -10,6 +11,9 @@ import database
 from embedding_retriever import find_relevant_chunks_semantic
 from knowledge_importer import import_knowledge_pack
 from knowledge_validator import KnowledgeValidationError, validate_knowledge_pack
+
+
+KNOWLEDGE_PACK = Path(__file__).resolve().parents[1] / "knowledge" / "company_demo.json"
 
 
 def record(**overrides):
@@ -275,7 +279,7 @@ def test_approved_demo_records_retrieve_only_grounded_business_records(knowledge
             assert all(chunk.get("faq_id") != 42 for chunk in relevant)
 
 def test_demo_pack_has_three_production_contacts_and_five_demo_records():
-    records = json.loads(open("knowledge/company_demo.json", encoding="utf-8").read())
+    records = json.loads(KNOWLEDGE_PACK.read_text(encoding="utf-8"))
     validate_knowledge_pack(records)
     assert len(records) == 22
     demo_ids = {
@@ -311,7 +315,7 @@ def test_demo_pack_has_three_production_contacts_and_five_demo_records():
 
 def test_real_pack_production_and_demo_materialize_only_allowed_records(knowledge_database):
     path, base_id = knowledge_database
-    records = json.loads(open("knowledge/company_demo.json", encoding="utf-8").read())
+    records = json.loads(KNOWLEDGE_PACK.read_text(encoding="utf-8"))
     production = import_knowledge_pack(records, path, "company-pack", base_id, scope="production", apply=True)
     demo = import_knowledge_pack(records, path, "company-pack", base_id, scope="demo", apply=True)
     production_ids = {chunk.get("knowledge_id") for chunk in database.load_document_chunks(production.document_id) if chunk.get("knowledge_id")}
@@ -405,7 +409,7 @@ def test_production_change_updates_both_scope_fingerprints(knowledge_database):
 ])
 def test_real_contact_queries_return_only_three_approved_handles(knowledge_database, question):
     path, base_id = knowledge_database
-    records = json.loads(open("knowledge/company_demo.json", encoding="utf-8").read())
+    records = json.loads(KNOWLEDGE_PACK.read_text(encoding="utf-8"))
     imported = import_knowledge_pack(records, path, "company-pack", base_id, scope="production", apply=True)
     chunks = database.load_document_chunks(imported.document_id)
     relevant = find_relevant_chunks_semantic(

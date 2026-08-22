@@ -357,7 +357,7 @@ def test_prompt_injection_with_faq_id_does_not_override_pricing_category():
 
 
 def test_real_corpus_fixture_has_reviewable_contract_without_faq_text_copy():
-    fixture = Path("tests/fixtures/retrieval_v2_real_corpus.json")
+    fixture = Path(__file__).resolve().parent / "fixtures" / "retrieval_v2_real_corpus.json"
     cases = json.loads(fixture.read_text(encoding="utf-8"))
     assert len(cases) >= 20
     for case in cases:

@@ -2,6 +2,7 @@ import importlib
 import json
 
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 from llm_answer_generator import ConversationLLMResult
 
@@ -110,7 +111,14 @@ def test_provider_429_returns_controlled_503(tmp_path, monkeypatch):
 
 def test_missing_system_document_is_controlled_for_telegram(tmp_path, monkeypatch):
     app_module = load_test_app(tmp_path, monkeypatch, with_document=False)
-    monkeypatch.setattr("rag_service.generate_conversation_answer", lambda *_args: ConversationLLMResult("Unavailable", "system_document_unavailable", "gemini", 1.0))
+    monkeypatch.setattr(
+        "rag_service.generate_conversation_answer",
+        lambda *_args: pytest.fail("LLM/provider must not be called"),
+    )
+    monkeypatch.setattr(
+        "rag_service.find_relevant_chunks_semantic",
+        lambda **_kwargs: pytest.fail("retrieval must not be called"),
+    )
     with TestClient(app_module.app) as client:
         response = client.post(
             "/chat",

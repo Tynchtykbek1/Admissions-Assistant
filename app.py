@@ -358,6 +358,8 @@ def chat(request: QuestionRequest):
         raise HTTPException(403, "Conversation identity does not match.") from error
     except DocumentSelectionConflict as error:
         raise HTTPException(409, str(error)) from error
+    except SystemDocumentUnavailable:
+        raise
     except ValueError as error:
         raise HTTPException(404, str(error)) from error
     logger.info(

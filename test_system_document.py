@@ -173,12 +173,19 @@ def test_client_cannot_override_system_document_on_any_question_endpoint(
             assert response.status_code == 409, endpoint
 
 
-@pytest.mark.skip(reason="Legacy pre-LLM system-document routing contract")
 def test_missing_or_empty_system_document_is_controlled(
     tmp_path, monkeypatch
 ):
     _, database, _, _, app_module = _load_modules(tmp_path, monkeypatch, "2")
     _add_document(database, "empty.txt", with_chunks=False)
+    monkeypatch.setattr(
+        "rag_service.generate_conversation_answer",
+        lambda *_args: pytest.fail("LLM/provider must not be called"),
+    )
+    monkeypatch.setattr(
+        "rag_service.find_relevant_chunks_semantic",
+        lambda **_kwargs: pytest.fail("retrieval must not be called"),
+    )
 
     with TestClient(app_module.app) as client:
         missing = client.post(

@@ -6,7 +6,7 @@ from collections import OrderedDict
 from threading import Lock
 
 from app_settings import CHAT_HISTORY_CHARACTER_LIMIT, CHAT_HISTORY_LIMIT, DOCUMENT_CACHE_SIZE
-from conversation_service import SystemDocumentUnavailable, resolve_conversation
+from conversation_service import resolve_conversation
 from database import add_message, get_document, get_recent_messages, load_document_chunks, record_unanswered_question
 from embedding_retriever import find_relevant_chunks_semantic
 from llm_answer_generator import PROVIDER_UNAVAILABLE, SUCCESS, generate_conversation_answer
@@ -171,18 +171,12 @@ def _compat_response(*, question, answer, conversation, document, result, chunks
 
 
 def answer_conversation_question(*, question: str, conversation_id: str | None = None, external_chat_id: str | None = None, external_user_id: str | None = None, document_id: int | None = None) -> dict:
-    system_unavailable = False
-    try:
-        conversation = resolve_conversation(
-            conversation_id=conversation_id,
-            external_chat_id=external_chat_id,
-            external_user_id=external_user_id,
-            requested_document_id=document_id,
-        )
-    except SystemDocumentUnavailable as error:
-        if error.conversation is None:
-            raise
-        conversation, system_unavailable = error.conversation, True
+    conversation = resolve_conversation(
+        conversation_id=conversation_id,
+        external_chat_id=external_chat_id,
+        external_user_id=external_user_id,
+        requested_document_id=document_id,
+    )
 
     # Read before persisting current_message, so it appears exactly once to the model.
     history = _bounded_history(get_recent_messages(conversation["id"], CHAT_HISTORY_LIMIT))
@@ -195,7 +189,7 @@ def answer_conversation_question(*, question: str, conversation_id: str | None =
     def search_knowledge(query: str) -> dict:
         nonlocal selected_chunks, retrieval_ms
         started = time.perf_counter()
-        if document is not None and not system_unavailable:
+        if document is not None:
             selected_chunks = find_relevant_chunks_semantic(
                 question=query,
                 chunks=get_cached_document_chunks(document["id"]),

@@ -152,7 +152,7 @@ def test_status_and_reset_keep_system_document_and_isolate_histories(
     assert database.get_recent_messages(second_id, 10)[0]["content"] == "keep me"
 
 
-def test_client_cannot_override_system_document_on_any_question_endpoint(
+def test_client_cannot_override_system_document_on_chat(
     tmp_path, monkeypatch
 ):
     _, database, _, _, app_module = _load_modules(tmp_path, monkeypatch)
@@ -160,17 +160,16 @@ def test_client_cannot_override_system_document_on_any_question_endpoint(
     other_id = _add_document(database, "other.txt")
 
     with TestClient(app_module.app) as client:
-        for endpoint in ("/chat", "/ask-llm", "/ask", "/ask-semantic"):
-            response = client.post(
-                endpoint,
-                json={
-                    "question": "What is required?",
-                    "document_id": other_id,
-                    "external_chat_id": "chat",
-                    "external_user_id": "user",
-                },
-            )
-            assert response.status_code == 409, endpoint
+        response = client.post(
+            "/chat",
+            json={
+                "question": "What is required?",
+                "document_id": other_id,
+                "external_chat_id": "chat",
+                "external_user_id": "user",
+            },
+        )
+        assert response.status_code == 409
 
 
 def test_missing_or_empty_system_document_is_controlled(
@@ -334,9 +333,8 @@ def test_missing_telegram_identity_is_rejected_by_all_conversation_endpoints(
     _add_document(database, "system.txt")
 
     with TestClient(app_module.app) as client:
-        for endpoint in ("/chat", "/ask-llm", "/ask", "/ask-semantic"):
-            response = client.post(endpoint, json={"question": "Question?"})
-            assert response.status_code == 400, endpoint
+        response = client.post("/chat", json={"question": "Question?"})
+        assert response.status_code == 400
         reset = client.post("/conversation/reset", json={})
         status = client.get("/conversation/status")
 

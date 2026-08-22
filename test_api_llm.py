@@ -117,21 +117,6 @@ def test_empty_retrieval_cannot_return_success_or_unsupported_answer(
     assert body["retrieval_result_count"] == 0
 
 
-def test_ask_llm_backward_compatibility(tmp_path, monkeypatch):
-    app_module = load_test_app(tmp_path, monkeypatch)
-    def answer(_question, _history, search):
-        output = search("What is the deadline?")
-        return ConversationLLMResult("The deadline is 30 April.", "success", "gemini", 1.0, True, "search_knowledge", "What is the deadline?", output)
-    monkeypatch.setattr("rag_service.generate_conversation_answer", answer)
-    with TestClient(app_module.app) as client:
-        response = client.post(
-            "/ask-llm",
-            json={"question": "What is the deadline?", **TELEGRAM_IDENTITY},
-        )
-    assert response.status_code == 200
-    assert response.json()["status"] == "success"
-
-
 def test_provider_429_returns_controlled_503(tmp_path, monkeypatch):
     app_module = load_test_app(tmp_path, monkeypatch)
     monkeypatch.setattr("rag_service.generate_conversation_answer", lambda *_args: ConversationLLMResult("Unavailable", "provider_unavailable", "gemini", 1.0))

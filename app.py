@@ -9,7 +9,6 @@ import app_settings
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
-from answer_generator import generate_basic_answer
 from api_models import QuestionRequest, ResetRequest
 from app_settings import (
     MAX_UPLOAD_SIZE_BYTES,
@@ -32,8 +31,6 @@ from database import (
     get_document,
     initialize_database,
     insert_document_with_chunks,
-    load_document_chunks,
-    record_unanswered_question,
 )
 from document_processor import (
     extract_text_from_pdf,
@@ -42,22 +39,14 @@ from document_processor import (
     split_text_into_chunks,
 )
 from embedding_model import get_embedding_model, get_embedding_model_name
-from embedding_retriever import find_relevant_chunks_semantic
 from llm_answer_generator import PROVIDER_UNAVAILABLE
 from logging_config import configure_logging
 from rag_service import (
     SYSTEM_DOCUMENT_UNAVAILABLE,
     SYSTEM_DOCUMENT_UNAVAILABLE_ANSWER,
     answer_conversation_question,
-    build_sources,
     invalidate_document_cache,
     safe_conversation_label,
-)
-from retriever import find_relevant_chunks
-from retrieval_settings import (
-    SEMANTIC_FALLBACK_SCORE_THRESHOLD,
-    SEMANTIC_SCORE_THRESHOLD,
-    SEMANTIC_TOP_K,
 )
 
 
@@ -100,19 +89,6 @@ def _provider_configuration_ready() -> bool:
     return False
 
 
-def _resolve_request_document(request: QuestionRequest) -> tuple[dict, list[dict]]:
-    conversation = resolve_conversation(
-        conversation_id=request.conversation_id,
-        external_chat_id=request.external_chat_id,
-        external_user_id=request.external_user_id,
-        requested_document_id=request.document_id,
-    )
-    document_id = conversation["active_document_id"]
-    if document_id is None:
-        return conversation, []
-    return conversation, load_document_chunks(document_id)
-
-
 def _build_document_chunks(
     extracted_text: str,
     filename: str,
@@ -149,19 +125,6 @@ def _build_document_chunks(
         chunk["filename"] = filename
         chunk["embedding"] = embedding
     return document_type, chunks
-
-
-def _record_legacy_unanswered(question: str) -> None:
-    try:
-        record_unanswered_question(
-            question=question,
-            standalone_question=question,
-            reason="no_relevant_chunks",
-        )
-    except Exception:
-        logger.error(
-            "Failed to record an unanswered question without logging its content."
-        )
 
 
 @app.get("/")
@@ -374,11 +337,6 @@ def chat(request: QuestionRequest):
     return response
 
 
-@app.post("/ask-llm")
-def ask_question_llm(request: QuestionRequest):
-    return chat(request)
-
-
 @app.post("/conversation/reset")
 def reset(request: ResetRequest):
     return reset_conversation(
@@ -409,36 +367,4 @@ def conversation_status(
         "conversation_id": conversation["id"],
         "active_document_id": document["id"] if document else None,
         "active_document_filename": document["filename"] if document else None,
-    }
-
-
-@app.post("/ask")
-def ask_question(request: QuestionRequest):
-    _, chunks = _resolve_request_document(request)
-    relevant = find_relevant_chunks(request.question, chunks)
-    if not relevant:
-        _record_legacy_unanswered(request.question)
-    return {
-        "question": request.question,
-        "answer": generate_basic_answer(request.question, relevant),
-        "sources": build_sources(relevant),
-    }
-
-
-@app.post("/ask-semantic")
-def ask_question_semantic(request: QuestionRequest):
-    _, chunks = _resolve_request_document(request)
-    relevant = find_relevant_chunks_semantic(
-        request.question,
-        chunks,
-        top_k=SEMANTIC_TOP_K,
-        min_score=SEMANTIC_SCORE_THRESHOLD,
-        fallback_score_threshold=SEMANTIC_FALLBACK_SCORE_THRESHOLD,
-    )
-    if not relevant:
-        _record_legacy_unanswered(request.question)
-    return {
-        "question": request.question,
-        "answer": generate_basic_answer(request.question, relevant),
-        "sources": build_sources(relevant),
     }

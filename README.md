@@ -132,10 +132,6 @@ timings. Supported answer statuses are:
 - `system_document_unavailable` when the configured knowledge document is missing
   or empty
 
-`POST /ask-llm` delegates to the same flow for backward compatibility.
-`/ask` and `/ask-semantic` remain available as legacy Telegram-identified API
-endpoints.
-
 Other endpoints:
 
 - `GET /health` — cheap process liveness.

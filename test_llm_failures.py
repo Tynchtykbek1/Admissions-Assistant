@@ -47,7 +47,6 @@ def test_provider_errors_never_use_basic_fallback(monkeypatch, error, expected_c
 
     with (
         patch("llm_answer_generator.generate_gemini_answer", side_effect=error),
-        patch("answer_generator.generate_basic_answer") as basic,
     ):
         result = llm.generate_llm_answer("Нужна ли виза?", CHUNKS)
 
@@ -56,7 +55,6 @@ def test_provider_errors_never_use_basic_fallback(monkeypatch, error, expected_c
         "rate_limited" if getattr(error, "status_code", None) == 429 else expected_category
     )
     assert result.answer == llm.PROVIDER_UNAVAILABLE_ANSWER
-    basic.assert_not_called()
 
 
 def test_authentication_error_is_safe(monkeypatch):

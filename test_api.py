@@ -6,32 +6,6 @@ from tempfile import TemporaryDirectory
 from fastapi.testclient import TestClient
 
 
-SAMPLE_DOCUMENT = """
-University Admissions Sample Document
-
-University: University of Milan
-Country: Italy
-Program: Bachelor in International Relations
-Language of instruction: English
-
-Admission Requirements:
-Applicants must have completed secondary school education or an equivalent qualification.
-Applicants must provide a valid passport, high school diploma, transcript of records, motivation letter, and proof of English language proficiency.
-For English-taught bachelor programs, the minimum English requirement is IELTS 6.0 or an equivalent certificate such as TOEFL or Cambridge English.
-
-Application Deadline:
-The standard application deadline for non-EU students is 30 April.
-Late applications may not be accepted unless the university officially extends the deadline.
-Students should always check the official university website before applying.
-
-Tuition Fees:
-The estimated tuition fee is 3000 EUR per year.
-
-Visa Documents:
-Non-EU students usually need a passport, admission letter, proof of financial means, accommodation proof, health insurance, and visa application form.
-"""
-
-
 FAQ_DOCUMENT = """
 1. Is admission guaranteed?
 Admission is never guaranteed. The university makes the final decision after reviewing the application.
@@ -57,44 +31,6 @@ def upload_text(client: TestClient, filename: str, text: str) -> dict:
     return result
 
 
-def ask_semantic(
-    client: TestClient,
-    question: str,
-    document_id: int,
-) -> dict:
-    response = client.post(
-        "/ask-semantic",
-        json={
-            "question": question,
-            "external_chat_id": "manual-test-chat",
-            "external_user_id": "manual-test-user",
-            "document_id": document_id,
-        },
-    )
-    response.raise_for_status()
-    return response.json()
-
-
-def run_standard_document_tests(client: TestClient) -> None:
-    upload_result = upload_text(
-        client,
-        "admissions_sample_document.txt",
-        SAMPLE_DOCUMENT.strip()
-    )
-    assert upload_result["document_type"] == "standard"
-
-    test_cases = [
-        ("What English level is required?", "IELTS 6.0"),
-        ("What is the application deadline?", "30 April")
-    ]
-
-    for question, expected in test_cases:
-        result = ask_semantic(client, question, upload_result["document_id"])
-        assert expected.casefold() in result["answer"].casefold()
-
-    print("Standard document API tests: PASS")
-
-
 def run_health_test(client: TestClient) -> None:
     response = client.get("/health")
     assert response.status_code == 200
@@ -102,7 +38,7 @@ def run_health_test(client: TestClient) -> None:
     print("Health endpoint test: PASS")
 
 
-def run_faq_test(client: TestClient) -> None:
+def run_faq_upload_test(client: TestClient) -> None:
     upload_result = upload_text(
         client,
         "admissions_faq_document.txt",
@@ -110,17 +46,7 @@ def run_faq_test(client: TestClient) -> None:
     )
     assert upload_result["document_type"] == "faq"
     assert upload_result["entries_count"] == upload_result["chunks_count"]
-
-    result = ask_semantic(
-        client,
-        "Do I have guaranteed admission?",
-        upload_result["document_id"],
-    )
-    answer = result["answer"].casefold()
-    assert "admission is never guaranteed" in answer
-    assert "is admission guaranteed?" not in answer
-
-    print("FAQ-style document API test: PASS")
+    print("FAQ-style document upload test: PASS")
 
 
 def run_database_restore_test(app_module, database_module, temporary_db: Path) -> None:
@@ -150,8 +76,7 @@ def main() -> None:
 
         with TestClient(app.app) as client:
             run_health_test(client)
-            run_standard_document_tests(client)
-            run_faq_test(client)
+            run_faq_upload_test(client)
             run_database_restore_test(app, database, temporary_db)
 
     if original_database_path is None:

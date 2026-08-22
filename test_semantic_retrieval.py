@@ -3,7 +3,6 @@ from unittest.mock import patch
 
 import numpy as np
 
-from answer_generator import generate_basic_answer
 from embedding_retriever import (
     build_retrieval_diagnostics,
     find_relevant_chunks_semantic,
@@ -159,7 +158,7 @@ class MultilingualRetrievalTests(unittest.TestCase):
         )
         self.assertEqual(results[0]["faq_id"], 16)
 
-    def test_missing_visa_information_does_not_fabricate_answer(self):
+    def test_missing_visa_information_returns_no_retrieval_results(self):
         chunks_without_visa = [
             chunk for chunk in self.chunks
             if "виз" not in (chunk.get("question", "") + chunk["text"]).casefold()
@@ -168,10 +167,6 @@ class MultilingualRetrievalTests(unittest.TestCase):
             "Нужна ли виза?", chunks_without_visa, top_k=3, min_score=0.99
         )
         self.assertEqual(results, [])
-        self.assertIn(
-            "not enough information",
-            generate_basic_answer("Нужна ли виза?", results).casefold()
-        )
 
     def test_exact_apostille_question_ranks_first(self):
         results = find_relevant_chunks_semantic(

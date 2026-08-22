@@ -3,13 +3,14 @@ import logging
 import re
 import time
 from collections import OrderedDict
+from dataclasses import replace
 from threading import Lock
 
 from app_settings import CHAT_HISTORY_CHARACTER_LIMIT, CHAT_HISTORY_LIMIT, DOCUMENT_CACHE_SIZE
 from conversation_service import resolve_conversation
 from database import add_message, get_document, get_recent_messages, load_document_chunks, record_unanswered_question
 from embedding_retriever import find_relevant_chunks_semantic
-from llm_answer_generator import PROVIDER_UNAVAILABLE, SUCCESS, generate_conversation_answer
+from llm_answer_generator import INSUFFICIENT_DOCUMENT_INFORMATION, INSUFFICIENT_INFORMATION_ANSWER, PROVIDER_UNAVAILABLE, SUCCESS, generate_conversation_answer
 from retrieval_settings import CONTEXT_SCORE_MARGIN, SEMANTIC_FALLBACK_SCORE_THRESHOLD, SEMANTIC_SCORE_THRESHOLD, SEMANTIC_TOP_K
 
 
@@ -213,6 +214,12 @@ def answer_conversation_question(*, question: str, conversation_id: str | None =
         return _tool_result(selected_chunks)
 
     result = generate_conversation_answer(question, history, search_knowledge)
+    if result.tool_called and not selected_chunks:
+        result = replace(
+            result,
+            status=INSUFFICIENT_DOCUMENT_INFORMATION,
+            answer=INSUFFICIENT_INFORMATION_ANSWER,
+        )
     answer, guard_triggered = _factual_guard(result.answer, result.tool_output)
     if result.status != PROVIDER_UNAVAILABLE:
         add_message(conversation["id"], "assistant", answer)

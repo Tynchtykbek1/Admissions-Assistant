@@ -4,7 +4,7 @@ import json
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
-from llm_answer_generator import ConversationLLMResult
+from llm_answer_generator import ConversationLLMResult, INSUFFICIENT_INFORMATION_ANSWER
 
 
 SYNTHETIC_CHUNK = {
@@ -79,6 +79,42 @@ def test_chat_success_has_conversation_status_timings_and_sources(
     assert body["conversation_id"]
     assert body["retrieval_duration_ms"] >= 0
     assert body["sources"][0]["faq_id"] == 11
+
+
+def test_empty_retrieval_cannot_return_success_or_unsupported_answer(
+    tmp_path, monkeypatch
+):
+    app_module = load_test_app(tmp_path, monkeypatch)
+    monkeypatch.setattr("rag_service.find_relevant_chunks_semantic", lambda **_kwargs: [])
+
+    def answer(_question, _history, search):
+        output = search("What is the tuition fee?")
+        return ConversationLLMResult(
+            "The tuition fee is 10,000 euros.",
+            "success",
+            "gemini",
+            1.0,
+            True,
+            "search_knowledge",
+            "What is the tuition fee?",
+            output,
+        )
+
+    monkeypatch.setattr("rag_service.generate_conversation_answer", answer)
+
+    with TestClient(app_module.app) as client:
+        response = client.post(
+            "/chat",
+            json={"question": "What is the tuition fee?", **TELEGRAM_IDENTITY},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "insufficient_document_information"
+    assert body["answer"] == INSUFFICIENT_INFORMATION_ANSWER
+    assert "10,000" not in body["answer"]
+    assert body["sources"] == []
+    assert body["retrieval_result_count"] == 0
 
 
 def test_ask_llm_backward_compatibility(tmp_path, monkeypatch):

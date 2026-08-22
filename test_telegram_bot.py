@@ -459,8 +459,9 @@ class TelegramHandlerTests(unittest.IsolatedAsyncioTestCase):
                 HELP_MESSAGES[language], parse_mode=ParseMode.HTML
             )
             help_text = help_update.message.reply_text.await_args.args[0]
-            self.assertIn("@TheLuckiestPersonEver", help_text)
-            self.assertIn("@maksatuniguide", help_text)
+            self.assertNotRegex(help_text, r"@[A-Za-z0-9_]+")
+            self.assertNotIn("manager", help_text.casefold())
+            self.assertNotIn("менеджер", help_text.casefold())
 
 
 if __name__ == "__main__":

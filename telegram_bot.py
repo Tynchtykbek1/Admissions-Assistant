@@ -50,10 +50,7 @@ HELP_MESSAGES = {
         "• Нужно ли апостилировать документы?\n\n"
         "Можно задавать уточняющие вопросы: бот учитывает недавний контекст диалога.\n"
         "Используйте /reset, чтобы очистить историю текущего диалога.\n\n"
-        "Ответы основаны на загруженных документах о поступлении.\n\n"
-        "Если нужного ответа нет, вы можете написать менеджерам:\n\n"
-        "• Адахан — @TheLuckiestPersonEver\n"
-        "• Максат — @maksatuniguide"
+        "Ответы основаны на загруженных документах о поступлении."
     ),
     "en": (
         "I can help with admissions, required documents, application deadlines, "
@@ -64,10 +61,7 @@ HELP_MESSAGES = {
         "• Do my documents need an apostille?\n\n"
         "Follow-up questions are supported using recent conversation context.\n"
         "Use /reset to clear the current conversation history.\n\n"
-        "Answers are based on the uploaded admissions documents.\n\n"
-        "If the answer is not available, you can contact the managers:\n\n"
-        "• Adakhan — @TheLuckiestPersonEver\n"
-        "• Maksat — @maksatuniguide"
+        "Answers are based on the uploaded admissions documents."
     ),
 }
 

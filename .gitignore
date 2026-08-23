@@ -6,3 +6,4 @@ uploads/
 test_files/
 admissions.db
 unanswered*.csv
+*.egg-info/
